@@ -27,6 +27,16 @@ services:
     restart: unless-stopped
     # No ports published: only the app containers can reach the database.
 
+  # One-shot: applies migrations, then exits. bot and api wait for it to succeed,
+  # so the schema is always current and only one process ever runs Alembic.
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     <<: *app
     command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -34,8 +44,8 @@ services:
       # Bound to loopback only: not reachable from other machines.
       - "127.0.0.1:8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
       interval: 15s
