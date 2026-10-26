@@ -37,6 +37,16 @@ services:
       db:
         condition: service_healthy
 
+  bot:
+    <<: *app
+    command: ["python", "-m", "app.bot.main"]
+    volumes:
+      - voice:/data/voice
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # No ports: long polling only makes outbound connections to Telegram.
+
   api:
     <<: *app
     command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -55,3 +65,4 @@ services:
 
 volumes:
   pgdata:
+  voice:

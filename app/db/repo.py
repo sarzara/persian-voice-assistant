@@ -16,9 +16,16 @@ async def upsert_user(
     name: str | None = None,
     email: str | None = None,
     timezone: str | None = None,
+    name_if_new: str | None = None,
 ) -> User:
-    """Insert the user, or update only the fields that were provided. Race-safe."""
+    """Insert the user, or update only the fields that were provided. Race-safe.
+
+    ``name_if_new`` is used only when the row is created, so a Telegram display
+    name never overwrites a name the owner set via the seed or settings.
+    """
     values: dict[str, Any] = {"telegram_user_id": telegram_user_id}
+    if name_if_new is not None:
+        values["name"] = name_if_new
     updates: dict[str, Any] = {}
     for column, value in (("name", name), ("email", email), ("timezone", timezone)):
         if value is not None:
