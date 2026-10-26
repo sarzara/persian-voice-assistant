@@ -1,0 +1,103 @@
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from sqlalchemy import func, select
+from telegram.constants import ChatType
+from telegram.ext import ApplicationHandlerStop
+
+from app.bot import handlers
+from app.bot import messages as msg
+from app.db.models import AuditEvent, VoiceMessage
+from app.db.session import session_scope
+
+ALLOWED = 111111111
+STRANGER = 999999999
+
+
+def make_update(user_id: int, *, text: str | None = None, voice=None, chat_type=ChatType.PRIVATE):
+    message = SimpleNamespace(text=text, voice=voice, message_id=42, reply_text=AsyncMock())
+    return SimpleNamespace(
+        effective_user=SimpleNamespace(id=user_id, full_name="Test User"),
+        effective_chat=SimpleNamespace(type=chat_type),
+        effective_message=message,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _env(monkeypatch, tmp_path):
+    monkeypatch.setenv("ALLOWED_USER_IDS", str(ALLOWED))
+    monkeypatch.setenv("VOICE_STORAGE_DIR", str(tmp_path / "voice"))
+
+
+async def test_gate_lets_allowlisted_user_through():
+    update = make_update(ALLOWED, text="hi")
+    await handlers.allowlist_gate(update, None)  # no exception
+    update.effective_message.reply_text.assert_not_called()
+
+
+async def test_gate_refuses_stranger_politely_in_persian():
+    update = make_update(STRANGER, text="hi")
+    with pytest.raises(ApplicationHandlerStop):
+        await handlers.allowlist_gate(update, None)
+    update.effective_message.reply_text.assert_awaited_once_with(msg.REFUSAL)
+
+
+async def test_gate_stays_silent_for_stranger_in_group():
+    update = make_update(STRANGER, text="hi", chat_type=ChatType.GROUP)
+    with pytest.raises(ApplicationHandlerStop):
+        await handlers.allowlist_gate(update, None)
+    update.effective_message.reply_text.assert_not_called()
+
+
+async def test_help_is_persian():
+    update = make_update(ALLOWED)
+    await handlers.help_command(update, None)
+    reply = update.effective_message.reply_text.await_args.args[0]
+    assert "راهنما" in reply
+
+
+async def test_echo_returns_text_unformatted():
+    update = make_update(ALLOWED, text="<b>سلام</b>")
+    await handlers.echo_text(update, None)
+    update.effective_message.reply_text.assert_awaited_once_with("پیام شما:\n<b>سلام</b>")
+
+
+async def test_start_creates_user_and_greets_in_persian(db):
+    update = make_update(ALLOWED)
+    await handlers.start(update, None)
+    reply = update.effective_message.reply_text.await_args.args[0]
+    assert reply.startswith("سلام Test User")
+
+
+async def test_voice_is_downloaded_and_stored(db, tmp_path):
+    async def download_to_drive(custom_path):
+        Path(custom_path).write_bytes(b"OggS-fake-audio")
+
+    voice = SimpleNamespace(
+        file_id="FILE_ID_1",
+        file_unique_id="UNIQ1",
+        duration=7,
+        file_size=1234,
+        get_file=AsyncMock(return_value=SimpleNamespace(download_to_drive=download_to_drive)),
+    )
+    update = make_update(ALLOWED, voice=voice)
+    await handlers.voice(update, None)
+
+    async with session_scope() as s:
+        row = (await s.execute(select(VoiceMessage))).scalar_one()
+        audits = await s.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.event_type == "voice.received"))
+    assert row.telegram_file_id == "FILE_ID_1" and row.duration_s == 7
+    assert Path(row.audio_path).read_bytes() == b"OggS-fake-audio"
+    assert audits == 1
+    reply = update.effective_message.reply_text.await_args.args[0]
+    assert "۷ ثانیه" in reply
+
+
+async def test_oversized_voice_rejected_without_download(tmp_path):
+    voice = SimpleNamespace(file_size=25 * 1024 * 1024, get_file=AsyncMock())
+    update = make_update(ALLOWED, voice=voice)
+    await handlers.voice(update, None)
+    voice.get_file.assert_not_called()
+    update.effective_message.reply_text.assert_awaited_once_with(msg.VOICE_TOO_LARGE)
