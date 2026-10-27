@@ -1,0 +1,171 @@
+# Production stack. Self-contained (not an override of docker-compose.yml):
+#   docker compose -f docker-compose.prod.yml up -d --build
+# No source code is mounted: the code is baked into the image. Only config (Caddyfile) is mounted read-only.
+
+name: persian-voice-assistant
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app: &app
+  image: persian-voice-assistant:${APP_VERSION:-latest}
+  build:
+    context: .
+    args:
+      PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+      APT_MIRROR: ${APT_MIRROR:-}
+      VOSK_MODEL_URL: ${VOSK_MODEL_URL:-https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip}
+      VOSK_MODEL_SHA256: ${VOSK_MODEL_SHA256:-}
+  env_file: .env
+  # Lets containers reach a proxy/tunnel running on the host (docs/DEPLOY.md, "Outbound access").
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+  init: true
+  logging: *logging
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:16-bookworm}
+    env_file: .env
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 768m}
+
+  migrate:
+    <<: *app
+    command: ["sh", "deploy/migrate.sh"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 384m}
+
+  bot:
+    <<: *app
+    command: ["python", "-m", "app.bot.main"]
+    volumes:
+      - voice:/data/voice
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # The bot touches /tmp/bot-heartbeat every 30 s while its event loop runs.
+      test: ["CMD", "python", "-c", "import os,sys,time; sys.exit(0 if time.time() - os.path.getmtime('/tmp/bot-heartbeat') < 120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        # Vosk model (~150 MB in RAM) + Python; ffmpeg runs briefly per voice message.
+        limits: {cpus: "1.5", memory: 1g}
+
+  api:
+    <<: *app
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    ports:
+      - "127.0.0.1:8000:8000"   # server-local only; reach it over SSH
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 768m}
+
+  dashboard:
+    <<: *app
+    command: ["uvicorn", "app.dashboard.app:app", "--host", "0.0.0.0", "--port", "8080",
+              "--proxy-headers", "--forwarded-allow-ips", "*"]
+    ports:
+      - "127.0.0.1:8080:8080"   # Caddy reaches it over the compose network; this is for SSH tunnels
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 384m}
+
+  caddy:
+    image: ${CADDY_IMAGE:-caddy:2.10.2}
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 256m}
+
+  # Optional: MCP over HTTP on 127.0.0.1:8001 (start with --profile mcp). stdio clients need no service.
+  mcp:
+    <<: *app
+    profiles: ["mcp"]
+    command: ["python", "-m", "app.mcp.server", "--http", "--port", "8001"]
+    ports:
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 384m}
+
+volumes:
+  pgdata:
+  voice:
+  caddy_data:
+  caddy_config:
