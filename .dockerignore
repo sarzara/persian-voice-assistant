@@ -11,3 +11,11 @@ data
 models
 *.ogg
 *.wav
+# Secrets must never be baked into an image layer
+secrets/
+credentials*.json
+client_secret*.json
+token*.json
+*.pem
+*.key
+backups/

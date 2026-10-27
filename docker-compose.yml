@@ -63,6 +63,17 @@ services:
       retries: 5
       start_period: 15s
 
+  # MCP server over streamable HTTP for IDEs (Bearer MCP_API_KEY). Claude Desktop uses stdio instead:
+  #   docker compose run --rm -i -T --no-deps mcp python -m app.mcp.server
+  mcp:
+    <<: *app
+    command: ["python", "-m", "app.mcp.server", "--http", "--port", "8001"]
+    ports:
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   pgdata:
   voice:

@@ -5,6 +5,7 @@ Run on a computer with a browser (NOT inside Docker). Standard library only:
 
     python scripts/google_auth.py                      # reads GOOGLE_CLIENT_ID/SECRET from env or ./.env
     python scripts/google_auth.py --client-id ... --client-secret ...
+    python scripts/google_auth.py --client-secrets secrets/credentials.json   # the JSON downloaded from Google
 
 Flow: loopback redirect (http://127.0.0.1:<random port>/) with PKCE, which is
 what Google recommends for "Desktop app" OAuth clients. Scope: calendar.events.
@@ -67,8 +68,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--client-id", default=os.environ.get("GOOGLE_CLIENT_ID") or dotenv.get("GOOGLE_CLIENT_ID"))
     parser.add_argument("--client-secret", default=os.environ.get("GOOGLE_CLIENT_SECRET") or dotenv.get("GOOGLE_CLIENT_SECRET"))
+    parser.add_argument("--client-secrets", type=Path, default=None,
+                        help="OAuth client JSON downloaded from Google Cloud (default: secrets/credentials.json if present)")
     parser.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a browser")
     args = parser.parse_args()
+    secrets_file = args.client_secrets or (Path("secrets/credentials.json") if Path("secrets/credentials.json").exists() else None)
+    if secrets_file:
+        data = json.loads(secrets_file.read_text(encoding="utf-8"))
+        client = data.get("installed") or data.get("web")
+        if not client:
+            print(f"{secrets_file} is not an OAuth client file (expected an 'installed' section).", file=sys.stderr)
+            return 2
+        if "installed" not in data:
+            print("Warning: this is a 'Web application' client; create a 'Desktop app' client instead.", file=sys.stderr)
+        args.client_id, args.client_secret = client["client_id"], client["client_secret"]
+        print(f"Using OAuth client from {secrets_file}", flush=True)
     if not args.client_id or not args.client_secret or "replace-me" in (args.client_id + args.client_secret):
         print("Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (env, .env, or --client-id/--client-secret).", file=sys.stderr)
         return 2

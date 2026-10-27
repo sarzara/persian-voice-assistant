@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     admin_api_key: SecretStr = SecretStr("")
     # Serves /docs and /openapi.json when true. Never enable on a public host.
     debug: bool = False
+    # Bearer token for the MCP server's HTTP transport (127.0.0.1:8001). stdio needs none.
+    mcp_api_key: SecretStr = SecretStr("")
 
     # Speech to text
     vosk_model_path: Path = Path("/opt/vosk-model")
