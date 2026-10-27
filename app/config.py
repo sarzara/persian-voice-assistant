@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     llm_timeout_s: float = Field(default=30.0, gt=0)
     llm_max_retries: int = Field(default=3, ge=0, le=6)
     agent_max_steps: int = Field(default=6, ge=1, le=6)
+    # USD per 1M tokens, JSON: {"model": {"input": 0.15, "cached_input": 0.003, "output": 0.60}}.
+    # Merged over built-in defaults (app/agent/usage.py). Unknown models are logged with cost NULL.
+    llm_prices: str = ""
     # A preview older than this can no longer be confirmed ("tomorrow" would be stale).
     confirmation_ttl_min: int = Field(default=60, gt=0)
 

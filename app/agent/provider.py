@@ -17,10 +17,12 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 import httpx
 
+from app.agent.usage import CallRecord, infer_purpose, record_llm_call
 from app.config import Settings, get_settings
 
 log = logging.getLogger(__name__)
@@ -56,6 +58,7 @@ class LLMResponse:
     model: str
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cached_tokens: int = 0
     latency_ms: int = 0
     finish_reason: str | None = None
     # The assistant message to append to the conversation for the next step.
@@ -80,6 +83,7 @@ class OpenAICompatibleProvider:
         temperature: float = 0.0,
         extra_body: dict[str, Any] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        call_logger: Callable[[CallRecord], Awaitable[None]] | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("LLM API key is not set")
@@ -87,6 +91,8 @@ class OpenAICompatibleProvider:
         self._max_retries = max_retries
         self._temperature = temperature
         self._extra_body = extra_body or {}
+        # Called once per complete() with tokens, latency and status (writes llm_calls in production).
+        self._call_logger = call_logger
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(timeout_s, connect=10.0),
@@ -98,6 +104,23 @@ class OpenAICompatibleProvider:
         await self._client.aclose()
 
     async def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> LLMResponse:
+        started = time.perf_counter()
+        purpose = infer_purpose(messages)
+        try:
+            response = await self._complete(messages, tools, counter := [0])
+        except LLMError as exc:
+            await self._log(CallRecord(self.model, purpose, 0, 0, 0, int((time.perf_counter() - started) * 1000),
+                                       counter[0], "error", str(exc)[:500]))
+            raise
+        await self._log(CallRecord(response.model, purpose, response.prompt_tokens, response.completion_tokens,
+                                   response.cached_tokens, response.latency_ms, counter[0], "ok"))
+        return response
+
+    async def _log(self, rec: CallRecord) -> None:
+        if self._call_logger is not None:
+            await self._call_logger(rec)
+
+    async def _complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], counter: list[int]) -> LLMResponse:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -111,6 +134,7 @@ class OpenAICompatibleProvider:
         started = time.perf_counter()
         last_error: LLMError | None = None
         for attempt in range(self._max_retries + 1):
+            counter[0] = attempt + 1
             try:
                 response = await self._client.post("/chat/completions", json=payload)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
@@ -149,6 +173,10 @@ class OpenAICompatibleProvider:
             for tc in message.get("tool_calls") or []
         ]
         usage = body.get("usage") or {}
+        # DeepSeek reports prompt_cache_hit_tokens; OpenAI-style APIs use prompt_tokens_details.cached_tokens.
+        cached = usage.get("prompt_cache_hit_tokens")
+        if cached is None:
+            cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
         # Keep only the fields the API accepts back in the history.
         history_msg: dict[str, Any] = {"role": "assistant", "content": message.get("content") or ""}
         if message.get("tool_calls"):
@@ -159,6 +187,7 @@ class OpenAICompatibleProvider:
             model=body.get("model", self.model),
             prompt_tokens=int(usage.get("prompt_tokens") or 0),
             completion_tokens=int(usage.get("completion_tokens") or 0),
+            cached_tokens=int(cached or 0),
             latency_ms=int((time.perf_counter() - started) * 1000),
             finish_reason=choice.get("finish_reason"),
             message=history_msg,
@@ -188,5 +217,6 @@ def provider_from_settings(settings: Settings | None = None, **kwargs: Any) -> O
         timeout_s=s.llm_timeout_s,
         max_retries=s.llm_max_retries,
         extra_body=json.loads(s.deepseek_extra_body or "{}"),
+        call_logger=kwargs.pop("call_logger", record_llm_call),
         **kwargs,
     )

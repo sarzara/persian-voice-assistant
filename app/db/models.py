@@ -14,6 +14,9 @@ import enum
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
+    Numeric,
+    SmallInteger,
     BigInteger,
     CheckConstraint,
     Date,
@@ -237,3 +240,36 @@ class AuditEvent(IdMixin, TimestampMixin, Base):
     payload_json: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+
+
+class LlmPurpose(str, enum.Enum):
+    STT_FIX = "stt_fix"      # reserved: LLM correction of a transcript
+    INTENT = "intent"        # first call of a run: understanding the request
+    TOOL_STEP = "tool_step"  # later calls after tool results
+    REVIEW = "review"        # reserved: self-check / evaluation calls
+
+
+class LlmCall(IdMixin, TimestampMixin, Base):
+    """One row per LLM request (after retries). Written by the provider itself."""
+
+    __tablename__ = "llm_calls"
+    __table_args__ = (
+        CheckConstraint(_in("purpose", LlmPurpose), name="purpose_valid"),
+        CheckConstraint("status IN ('ok', 'error')", name="status_valid"),
+        Index("ix_llm_calls_created_at", "created_at"),
+        Index("ix_llm_calls_model_created_at", "model", "created_at"),
+    )
+
+    # CASCADE: deleting a run (e.g. purging demo data) removes its calls too.
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), index=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    cached_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    # NULL when the model has no configured price (shown as "unpriced" on the dashboard).
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("1"))
+    status: Mapped[str] = mapped_column(String(8), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
