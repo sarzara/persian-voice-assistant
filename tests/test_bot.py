@@ -58,10 +58,20 @@ async def test_help_is_persian():
     assert "راهنما" in reply
 
 
-async def test_echo_returns_text_unformatted():
-    update = make_update(ALLOWED, text="<b>سلام</b>")
-    await handlers.echo_text(update, None)
-    update.effective_message.reply_text.assert_awaited_once_with("پیام شما:\n<b>سلام</b>")
+async def test_text_goes_through_agent_and_question_is_sent_plain(db, monkeypatch):
+    from app.agent.agent import AgentOutcome
+
+    seen = {}
+
+    async def fake_process(user, message_id, transcript, **kw):
+        seen.update(user=user.telegram_user_id, transcript=transcript, message_id=message_id)
+        return AgentOutcome("question", run_id=1, question="<b>چه ساعتی؟</b>")
+
+    monkeypatch.setattr(handlers.pipeline, "process_message", fake_process)
+    update = make_update(ALLOWED, text="  فردا با علی جلسه  ")
+    await handlers.text_message(update, None)
+    assert seen["user"] == ALLOWED and seen["transcript"] == "فردا با علی جلسه" and seen["message_id"]
+    update.effective_message.reply_text.assert_awaited_once_with("<b>چه ساعتی؟</b>")
 
 
 async def test_start_creates_user_and_greets_in_persian(db):
@@ -81,6 +91,12 @@ async def test_voice_is_downloaded_and_stored(db, tmp_path, monkeypatch):
         return SttResult(SttOutcome.OK, "فردا ساعت ده", 0.9)
 
     monkeypatch.setattr(handlers, "transcribe_voice_message", fake_stt)
+    responded = {}
+
+    async def fake_respond(update, context, db_user, message_id, transcript):
+        responded["transcript"] = transcript
+
+    monkeypatch.setattr(handlers, "respond_to", fake_respond)
 
     async def download_to_drive(custom_path):
         Path(custom_path).write_bytes(b"OggS-fake-audio")
@@ -102,7 +118,7 @@ async def test_voice_is_downloaded_and_stored(db, tmp_path, monkeypatch):
     assert seen["audio"] == b"OggS-fake-audio"
     assert audits == 1
     reply = update.effective_message.reply_text.await_args.args[0]
-    assert "فردا ساعت ده" in reply
+    assert "فردا ساعت ده" in reply and responded["transcript"] == "فردا ساعت ده"
 
 
 async def test_low_confidence_asks_to_repeat_in_persian():

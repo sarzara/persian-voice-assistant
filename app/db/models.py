@@ -40,6 +40,8 @@ class Intent(str, enum.Enum):
 
 
 class RunStatus(str, enum.Enum):
+    RUNNING = "running"                          # agent loop in progress
+    NEEDS_CLARIFICATION = "needs_clarification"  # agent asked the user a question
     PENDING_CONFIRMATION = "pending_confirmation"
     CONFIRMED = "confirmed"
     EXECUTED = "executed"
@@ -98,13 +100,20 @@ class Contact(IdMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="contacts")
 
 
+class MessageSource(str, enum.Enum):
+    VOICE = "voice"
+    TEXT = "text"  # typed messages (testing, or when speech recognition fails) use the same pipeline
+
+
 class VoiceMessage(IdMixin, TimestampMixin, Base):
     __tablename__ = "voice_messages"
 
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    telegram_file_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'voice'"))
+    # NULL for text messages.
+    telegram_file_id: Mapped[str | None] = mapped_column(String(255))
     duration_s: Mapped[int | None] = mapped_column(Integer)
     # Local path of the downloaded audio; cleared when the file is deleted after STT.
     audio_path: Mapped[str | None] = mapped_column(Text)
@@ -116,6 +125,7 @@ class VoiceMessage(IdMixin, TimestampMixin, Base):
             "stt_confidence IS NULL OR (stt_confidence >= 0 AND stt_confidence <= 1)",
             name="stt_confidence_range",
         ),
+        CheckConstraint(_in("source", MessageSource), name="source_valid"),
     )
 
 
@@ -129,6 +139,10 @@ class AgentRun(IdMixin, TimestampMixin, Base):
     voice_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("voice_messages.id", ondelete="SET NULL"), index=True
     )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Version of the system prompt that produced this run (for evaluation and regressions).
+    prompt_version: Mapped[str | None] = mapped_column(String(32))
+    steps: Mapped[int | None] = mapped_column(Integer)
     intent: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default=text(f"'{Intent.UNKNOWN.value}'")
     )

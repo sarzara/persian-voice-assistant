@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.db.models import CalendarEvent, Contact, Email, MemoryFact, ToolCall, ToolCallStatus, User
 from app.tools import persian
+from app.tools.schema_utils import clean_schema
 from app.tools.google_calendar import CalendarNotConfigured, CreatedEvent, event_id_for
 
 log = logging.getLogger(__name__)
@@ -283,11 +284,7 @@ class Tool:
     exposure: Exposure
 
     def openai_schema(self) -> dict[str, Any]:
-        schema = self.args_model.model_json_schema()
-        schema.pop("title", None)
-        for prop in schema.get("properties", {}).values():
-            prop.pop("title", None)
-        schema.setdefault("properties", {})
+        schema = clean_schema(self.args_model)
         return {"type": "function", "function": {"name": self.name, "description": self.description, "parameters": schema}}
 
 

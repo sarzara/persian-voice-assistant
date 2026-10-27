@@ -19,6 +19,9 @@ from app.db.models import VoiceMessage
 from app.db.repo import audit, upsert_user
 from app.db.session import session_scope
 from app.stt.service import SttOutcome, SttResult, transcribe_voice_message
+from app.agent import pipeline
+from app.agent.agent import AgentOutcome
+from telegram.constants import ChatAction
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +107,7 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text(stt_problem_message(result))
         return
     await message.reply_text(msg.TRANSCRIPT.format(text=result.text))
+    await respond_to(update, context, db_user, record.id, result.text)
 
 
 def stt_problem_message(result: SttResult) -> str:
@@ -114,9 +118,42 @@ def stt_problem_message(result: SttResult) -> str:
     return msg.STT_FAILED
 
 
-async def echo_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Sent as plain text (no parse_mode), so user input can never inject formatting or links.
-    await update.effective_message.reply_text(msg.ECHO.format(text=update.effective_message.text))
+async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Typed requests go through the same agent pipeline as transcribed voice."""
+    user = update.effective_user
+    text = update.effective_message.text.strip()
+    async with session_scope() as session:
+        db_user = await upsert_user(session, user.id, name_if_new=user.full_name)
+    message_id = await pipeline.store_text_message(db_user, text)
+    await respond_to(update, context, db_user, message_id, text)
+
+
+async def respond_to(update: Update, context: ContextTypes.DEFAULT_TYPE, db_user, message_id: int, transcript: str) -> None:
+    chat = update.effective_chat
+    if context is not None and chat is not None:
+        await context.bot.send_chat_action(chat.id, ChatAction.TYPING)
+    try:
+        outcome = await pipeline.process_message(db_user, message_id, transcript, **_editing_kwargs(context))
+    except ValueError as exc:  # e.g. DEEPSEEK_API_KEY missing
+        log.error("Agent not available: %s", exc)
+        await update.effective_message.reply_text(msg.AGENT_UNAVAILABLE)
+        return
+    await render_outcome(update, context, outcome)
+
+
+def _editing_kwargs(context) -> dict:
+    return {}
+
+
+async def render_outcome(update: Update, context, outcome: AgentOutcome) -> None:
+    # Plain text (no parse_mode): model output can never inject formatting or links.
+    message = update.effective_message
+    if outcome.kind == "question":
+        await message.reply_text(outcome.question)
+    elif outcome.kind == "action":
+        await message.reply_text(msg.ACTION_PROPOSED.format(action=outcome.action.model_dump_json(indent=1)))
+    else:
+        await message.reply_text(msg.AGENT_FAILED)
 
 
 async def unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
