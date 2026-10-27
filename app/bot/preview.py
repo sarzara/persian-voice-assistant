@@ -85,3 +85,14 @@ def render_failure(error: str | None) -> str:
     else:
         hint = "سرویس مقصد خطا داد."
     return f"❌ انجام نشد. {hint}\nلطفاً بعداً دوباره درخواست را بفرستید."
+
+
+def outcome_message(outcome) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Text (and buttons) for an AgentOutcome, shared by the bot and out-of-band notifications."""
+    from app.bot import messages as msg
+
+    if outcome.kind == "question":
+        return outcome.question, None
+    if outcome.kind == "action":
+        return render_preview(outcome.action, notes=outcome.notes), keyboard(outcome.run_id)
+    return msg.AGENT_FAILED, None

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     voice_storage_dir: Path = Path("/data/voice")
     log_level: str = "INFO"
 
+    # API / admin
+    # Required for every /runs, /events, /emails, /contacts call (header X-Admin-Key). Empty = admin API disabled.
+    admin_api_key: SecretStr = SecretStr("")
+    # Serves /docs and /openapi.json when true. Never enable on a public host.
+    debug: bool = False
+
     # Speech to text
     vosk_model_path: Path = Path("/opt/vosk-model")
     # Mean word confidence below this asks the user to repeat.

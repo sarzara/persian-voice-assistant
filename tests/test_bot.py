@@ -71,7 +71,7 @@ async def test_text_goes_through_agent_and_question_is_sent_plain(db, monkeypatc
     update = make_update(ALLOWED, text="  فردا با علی جلسه  ")
     await handlers.text_message(update, None)
     assert seen["user"] == ALLOWED and seen["transcript"] == "فردا با علی جلسه" and seen["message_id"]
-    update.effective_message.reply_text.assert_awaited_once_with("<b>چه ساعتی؟</b>")
+    update.effective_message.reply_text.assert_awaited_once_with("<b>چه ساعتی؟</b>", reply_markup=None)
 
 
 async def test_start_creates_user_and_greets_in_persian(db):

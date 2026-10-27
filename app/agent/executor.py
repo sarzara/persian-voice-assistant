@@ -96,24 +96,33 @@ async def confirm_and_execute(
         action = parse_action(run.action_json)
         await audit(s, "run.confirmed", f"telegram:{telegram_user_id}", run_id=run_id)
 
+    return await _execute(run_id, user.id, action, row_key=execution_key(run_id),
+                          calendar=calendar, mailer=mailer, now=now)
+
+
+async def _execute(run_id: int, user_id: int, action: ScheduleAction | EmailAction, *, row_key: str,
+                   calendar: CalendarBackend | None, mailer: MailBackend | None,
+                   now: dt.datetime | None) -> ExecResult:
+    """Steps 2 and 3. ``row_key`` names this attempt; the provider always gets execution_key(run_id),
+    so a retry of an attempt that secretly succeeded is deduplicated by Google/Resend."""
+    settings = get_settings()
     tool_name = "create_calendar_event" if isinstance(action, ScheduleAction) else "send_email"
-    key = execution_key(run_id)
 
     # 2) Reserve the idempotency key before touching any provider.
     try:
         async with session_scope() as s:
             s.add(ToolCall(run_id=run_id, tool_name=tool_name, arguments_json=action.tool_args(),
-                           status=ToolCallStatus.PENDING.value, idempotency_key=key))
+                           status=ToolCallStatus.PENDING.value, idempotency_key=row_key))
     except IntegrityError:
         return ExecResult(ExecStatus.ALREADY_DONE, action)
 
-    # 3) Execute with the key forwarded to the provider.
+    # 3) Execute with the run's key forwarded to the provider.
     async with session_scope() as s:
-        db_user = await s.get(User, user.id)
-        row = (await s.execute(select(ToolCall).where(ToolCall.idempotency_key == key))).scalar_one()
+        db_user = await s.get(User, user_id)
+        row = (await s.execute(select(ToolCall).where(ToolCall.idempotency_key == row_key))).scalar_one()
         ctx = ToolContext(session=s, user=db_user, settings=settings,
                           now=now or dt.datetime.now(dt.timezone.utc), calendar=calendar, mailer=mailer,
-                          run_id=run_id, idempotency_key=key)
+                          run_id=run_id, idempotency_key=execution_key(run_id))
         result = await invoke(tool_name, action.tool_args(), ctx, allowed={Exposure.ACTION}, log_row=row)
         run = await s.get(AgentRun, run_id)
         run.status = (RunStatus.EXECUTED if result.ok else RunStatus.FAILED).value
@@ -124,6 +133,41 @@ async def confirm_and_execute(
         log.error("Run %s execution failed: %s", run_id, result.error)
         return ExecResult(ExecStatus.FAILED, action, error=result.error)
     return ExecResult(ExecStatus.EXECUTED, action, data=result.data)
+
+
+class RetryNotAllowed(Exception):
+    pass
+
+
+async def retry_failed_execution(run_id: int, *, actor: str, calendar: CalendarBackend | None,
+                                 mailer: MailBackend | None, now: dt.datetime | None = None) -> ExecResult:
+    """Re-run a confirmed action whose execution failed. The owner already confirmed it once."""
+    async with session_scope() as s:
+        run = await s.get(AgentRun, run_id)
+        if run is None:
+            return ExecResult(ExecStatus.NOT_FOUND)
+        if run.status != RunStatus.FAILED.value or run.intent not in ("schedule", "email") or not run.action_json:
+            raise RetryNotAllowed(f"run {run_id} is {run.status!r}, not a failed execution")
+        action = parse_action(run.action_json)
+        if isinstance(action, ScheduleAction):
+            user = await s.get(User, run.user_id)
+            from zoneinfo import ZoneInfo
+
+            start = dt.datetime.combine(action.date, action.time, ZoneInfo(user.timezone))
+            if start < (now or dt.datetime.now(dt.timezone.utc)):
+                raise RetryNotAllowed("the event time has already passed")
+        won = (await s.execute(
+            update(AgentRun).where(AgentRun.id == run_id, AgentRun.status == RunStatus.FAILED.value)
+            .values(status=RunStatus.CONFIRMED.value).returning(AgentRun.id)
+        )).scalar_one_or_none()
+        if won is None:
+            return ExecResult(ExecStatus.ALREADY_DONE, action)
+        attempts = await s.scalar(select(func.count()).select_from(ToolCall).where(
+            ToolCall.run_id == run_id, ToolCall.idempotency_key.like(f"{execution_key(run_id)}%")))
+        await audit(s, "run.retry", actor, run_id=run_id, attempt=attempts + 1)
+        user_id = run.user_id
+    return await _execute(run_id, user_id, action, row_key=f"{execution_key(run_id)}-retry{attempts}",
+                          calendar=calendar, mailer=mailer, now=now)
 
 
 async def reject_run(run_id: int, telegram_user_id: int, reason: str) -> ExecResult:

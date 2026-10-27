@@ -146,16 +146,8 @@ async def respond_to(update: Update, context: ContextTypes.DEFAULT_TYPE, db_user
 
 async def render_outcome(update: Update, context, outcome: AgentOutcome) -> None:
     # Plain text (no parse_mode): model output can never inject formatting or links.
-    message = update.effective_message
-    if outcome.kind == "question":
-        await message.reply_text(outcome.question)
-    elif outcome.kind == "action":
-        await message.reply_text(
-            preview.render_preview(outcome.action, notes=outcome.notes),
-            reply_markup=preview.keyboard(outcome.run_id),
-        )
-    else:
-        await message.reply_text(msg.AGENT_FAILED)
+    text, markup = preview.outcome_message(outcome)
+    await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
