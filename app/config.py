@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # Longer voices are refused before download: bounds CPU time per message.
     stt_max_duration_s: int = Field(default=120, gt=0)
 
+    # LLM (DeepSeek, OpenAI-compatible API)
+    deepseek_api_key: SecretStr = SecretStr("")
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    llm_timeout_s: float = Field(default=30.0, gt=0)
+    llm_max_retries: int = Field(default=3, ge=0, le=6)
+    agent_max_steps: int = Field(default=6, ge=1, le=6)
+
     @field_validator("allowed_user_ids_raw")
     @classmethod
     def _validate_ids(cls, v: str) -> str:
