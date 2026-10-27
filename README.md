@@ -5,7 +5,7 @@ A personal Telegram assistant. Send a voice message in Persian ("فردا ساع
 event or email, shows you a Persian preview, and acts **only after you tap ✅ تأیید**.
 The full spec is in [docs/SPEC.md](docs/SPEC.md).
 
-**Status:** batch 01 (foundation) and batch 02 (speech-to-text, agent, tools, confirmation, memory).
+**Status:** batches 01–03: foundation; speech-to-text, agent, tools, confirmation, memory; admin API, MCP server, hardening.
 
 ## How a message flows
 
@@ -113,6 +113,75 @@ send to your own Resend account address). Replies to assistant emails go to `OWN
 Prompt injection: the transcript is wrapped in `<transcript>` (with `<`/`>` neutralised) and labelled
 as data, but the real protection is structural: during planning the model can only *read*, its final
 answer is validated in code, and nothing happens without your tap.
+
+## Admin API (127.0.0.1:8000)
+
+Every endpoint except `/health*` needs the header `X-Admin-Key: $ADMIN_API_KEY`.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/health` | database, Telegram (`getMe`), LLM (`/models`); 503 if any fails; external checks cached 30 s |
+| GET | `/health/live` | process only (used by the container healthcheck) |
+| GET | `/runs` | filters `status`, `intent`, `model`, `user_id`, `since`, `until`; `limit` (1–100), `offset` |
+| GET | `/runs/{id}` | run + transcript + action JSON + tool calls (never audio) |
+| POST | `/runs/{id}/retry` | failed execution → re-run the confirmed action (idempotent); failed planning → re-plan and send the new preview to Telegram for confirmation |
+| GET | `/events`, `/emails` | `date_from`/`date_to`; `status`/`to` |
+| GET/POST | `/contacts` | `q` search; POST `{"name", "email", "aliases"}` (409 if the name exists) |
+
+```bash
+curl -s -H "X-Admin-Key: $ADMIN_API_KEY" "http://127.0.0.1:8000/runs?status=failed&limit=5"
+```
+
+Interactive docs (`/docs`) exist only with `DEBUG=true`.
+
+## MCP server
+
+The same tools the agent uses, for MCP clients: `find_contact`, `list_calendar_events`,
+`create_calendar_event`, `send_email`, and the resource `calendar://upcoming` (next 7 days).
+`create_calendar_event` and `send_email` do nothing unless called with `confirm: true`; every attempt
+is recorded in `audit_events`, and repeating a call (same `request_id`, or same arguments) never acts
+twice. `confirm` protects against accidental calls; **the real approval is your MCP client's
+tool-approval prompt**, so keep it on for these two tools.
+
+**Claude Desktop (stdio).** With the stack running (`docker compose up -d`), edit
+`%APPDATA%\Claude\claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`):
+
+```json
+{
+  "mcpServers": {
+    "persian-assistant": {
+      "command": "docker",
+      "args": ["compose", "-f", "C:\\Users\\Sahar\\Desktop\\Personal Assistant\\docker-compose.yml",
+               "run", "--rm", "-i", "-T", "--no-deps", "mcp", "python", "-m", "app.mcp.server"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop; the tools appear under the plug icon. `-T` matters: without it Docker allocates
+a TTY and corrupts the stdio protocol.
+
+**IDEs (streamable HTTP).** The `mcp` service listens on `http://127.0.0.1:8001/mcp` and requires
+`Authorization: Bearer $MCP_API_KEY`. VS Code (`.vscode/mcp.json`):
+
+```json
+{ "servers": { "persian-assistant": { "type": "http", "url": "http://127.0.0.1:8001/mcp",
+  "headers": { "Authorization": "Bearer ${input:mcpKey}" } } },
+  "inputs": [ { "id": "mcpKey", "type": "promptString", "password": true, "description": "MCP_API_KEY" } ] }
+```
+
+Cursor and other clients take the same URL and header. Do not expose port 8001 beyond localhost.
+
+## Operations
+
+- **Logs** are JSON lines. `request_id` (`tg-<update_id>`, `api-…`, `mcp-…`) and `run_id` follow one
+  request through bot → agent → tools → executor:
+  `docker compose logs bot | grep '"run_id": 42'`. Set `LOG_FORMAT=text` for local reading.
+- **Errors** reach the user as one short Persian sentence plus `کد پیگیری: tg-…`, the same id as in the logs.
+- **Rate limit**: `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_PER_HOUR` messages per user (button taps exempt).
+- **Voice length**: up to `STT_MAX_DURATION_S` (60) seconds.
+- **Audio retention**: transcribed audio is deleted immediately; a job in the bot deletes anything left
+  older than `AUDIO_RETENTION_MIN` (60) minutes.
 
 ## Everyday commands
 
