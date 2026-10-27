@@ -39,3 +39,5 @@ models/
 .idea/
 .DS_Store
 Thumbs.db
+evals/results/*
+!evals/results/.gitkeep

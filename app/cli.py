@@ -2,7 +2,8 @@
 
     python -m app.cli send-test-email            # to OWNER_EMAIL
     python -m app.cli send-test-email --to you@example.com
-    python -m app.cli eval-agent                 # 10 Persian samples against the real LLM
+    python -m app.cli eval-agent                 # 30 Persian transcripts against the real LLM (accuracy report)
+    python -m app.cli eval-agent --quick         # the 10 core samples
 
 In Docker:  docker compose run --rm api python -m app.cli send-test-email
 """
@@ -74,13 +75,23 @@ async def send_test_email(to: str | None) -> int:
     return 0
 
 
-async def eval_agent(as_json: bool) -> int:
+async def eval_agent(as_json: bool, quick: bool = False, out: str | None = None) -> int:
     import json
 
-    from app.agent.evaluation import run_live_eval
+    from app.agent.evaluation import render_report, run_eval_set, run_live_eval
     from app.db.session import get_engine
 
     try:
+        if not quick:
+            summary, results, meta = await run_eval_set()
+            report = render_report(summary, results, meta)
+            if out:
+                with open(out, "w", encoding="utf-8") as f:
+                    f.write(report if out.endswith(".md") else json.dumps(
+                        {"summary": summary, "results": results, "meta": meta}, ensure_ascii=False, indent=1))
+            print(json.dumps({"summary": summary, "results": results, "meta": meta}, ensure_ascii=False, indent=1)
+                  if as_json else report)
+            return 0 if summary["intent"]["accuracy"] == 1.0 and summary["safety"]["accuracy"] in (None, 1.0) else 1
         results = await run_live_eval()
     except ValueError as exc:  # missing DEEPSEEK_API_KEY
         print(f"FAILED: {exc}", file=sys.stderr)
@@ -110,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     p_test.add_argument("--to", help="recipient (default: OWNER_EMAIL)")
     p_eval = sub.add_parser("eval-agent", help="run the 10 Persian sample requests against the real LLM")
     p_eval.add_argument("--json", action="store_true", help="machine-readable output")
+    p_eval.add_argument("--quick", action="store_true", help="only the 10 core samples")
+    p_eval.add_argument("--out", help="also write the report to this file (.md or .json)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=get_settings().log_level, format="%(levelname)s %(message)s")
@@ -118,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "send-test-email":
         return asyncio.run(send_test_email(args.to))
     if args.command == "eval-agent":
-        return asyncio.run(eval_agent(args.json))
+        return asyncio.run(eval_agent(args.json, args.quick, args.out))
     return 2  # pragma: no cover
 
 
