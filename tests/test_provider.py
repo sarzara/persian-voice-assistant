@@ -93,6 +93,17 @@ async def test_client_errors_not_retried(status):
     assert calls["n"] == 1 and err.value.status_code == status
 
 
+async def test_extra_body_merged_into_request():
+    seen = {}
+
+    def handler(request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json=ok_body(content="x"))
+
+    await make(handler, extra_body={"thinking": {"type": "disabled"}}).complete([], [])
+    assert seen["thinking"] == {"type": "disabled"}
+
+
 async def test_malformed_response_raises():
     with pytest.raises(LLMError):
         await make(lambda r: httpx.Response(200, json={"choices": []})).complete([], [])

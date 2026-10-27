@@ -82,6 +82,15 @@ async def test_health_reports_each_dependency(monkeypatch, db):
         return httpx.Response(500)  # LLM down
 
     checks = await health.readiness(httpx.MockTransport(handler))
+    health._cache.clear()
+
+    def models_handler(request):
+        if "api.telegram.org" in str(request.url):
+            return httpx.Response(200, json={"ok": True, "result": {"username": "my_bot"}})
+        return httpx.Response(200, json={"data": [{"id": "deepseek-v4-pro"}]})
+
+    retired = (await health.readiness(httpx.MockTransport(models_handler)))["llm"]
+    assert not retired.ok and "not offered" in retired.detail and "deepseek-v4-pro" in retired.detail
     assert checks["database"].ok and checks["telegram"].ok and checks["telegram"].detail == "@my_bot"
     assert not checks["llm"].ok and checks["llm"].detail == "HTTPStatusError"
     assert "sk-test" not in str(checks) and "123:abc" not in str(checks)

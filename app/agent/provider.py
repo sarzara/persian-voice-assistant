@@ -78,6 +78,7 @@ class OpenAICompatibleProvider:
         timeout_s: float = 30.0,
         max_retries: int = 3,
         temperature: float = 0.0,
+        extra_body: dict[str, Any] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         if not api_key:
@@ -85,6 +86,7 @@ class OpenAICompatibleProvider:
         self.model = model
         self._max_retries = max_retries
         self._temperature = temperature
+        self._extra_body = extra_body or {}
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(timeout_s, connect=10.0),
@@ -104,6 +106,7 @@ class OpenAICompatibleProvider:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        payload.update(self._extra_body)
 
         started = time.perf_counter()
         last_error: LLMError | None = None
@@ -184,5 +187,6 @@ def provider_from_settings(settings: Settings | None = None, **kwargs: Any) -> O
         model=s.deepseek_model,
         timeout_s=s.llm_timeout_s,
         max_retries=s.llm_max_retries,
+        extra_body=json.loads(s.deepseek_extra_body or "{}"),
         **kwargs,
     )

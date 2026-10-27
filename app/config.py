@@ -67,7 +67,10 @@ class Settings(BaseSettings):
     # LLM (DeepSeek, OpenAI-compatible API)
     deepseek_api_key: SecretStr = SecretStr("")
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    # deepseek-chat / deepseek-reasoner were retired on 2026-07-24; GET /health verifies the name exists.
+    deepseek_model: str = "deepseek-v4-flash"
+    # Optional JSON merged into every chat request, e.g. {"thinking": {"type": "disabled"}}
+    deepseek_extra_body: str = "{}"
     llm_timeout_s: float = Field(default=30.0, gt=0)
     llm_max_retries: int = Field(default=3, ge=0, le=6)
     agent_max_steps: int = Field(default=6, ge=1, le=6)

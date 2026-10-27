@@ -28,8 +28,9 @@ async def _timed(coro) -> Check:
         detail = await asyncio.wait_for(coro, timeout=TIMEOUT_S)
         return Check(ok=True, latency_ms=int((time.perf_counter() - started) * 1000), detail=detail)
     except Exception as exc:  # noqa: BLE001 - report, never raise from a probe
-        return Check(ok=False, latency_ms=int((time.perf_counter() - started) * 1000),
-                     detail=exc.__class__.__name__)  # class name only: messages may contain URLs/tokens
+        # Class name only (messages may contain URLs/tokens), except our own safe LookupError.
+        detail = str(exc) if isinstance(exc, LookupError) else exc.__class__.__name__
+        return Check(ok=False, latency_ms=int((time.perf_counter() - started) * 1000), detail=detail)
 
 
 async def _db() -> str | None:
@@ -56,6 +57,10 @@ async def _llm(transport: httpx.AsyncBaseTransport | None = None) -> str | None:
     async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=transport) as c:
         r = await c.get(s.deepseek_base_url.rstrip("/") + "/models", headers={"Authorization": f"Bearer {key}"})
     r.raise_for_status()
+    available = {m.get("id") for m in r.json().get("data", [])}
+    if available and s.deepseek_model not in available:
+        # e.g. a retired model name: the provider is up, but every agent call would fail.
+        raise LookupError(f"model {s.deepseek_model!r} not offered; available: {sorted(available)}")
     return s.deepseek_model
 
 

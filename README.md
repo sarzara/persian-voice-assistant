@@ -51,7 +51,7 @@ Minimum `.env` for batch 02: `TELEGRAM_BOT_TOKEN`, `ALLOWED_USER_IDS`, `OWNER_*`
 ### DeepSeek
 
 Create a key at platform.deepseek.com and set `DEEPSEEK_API_KEY`. `DEEPSEEK_BASE_URL`
-(`https://api.deepseek.com`) and `DEEPSEEK_MODEL` (`deepseek-chat`) can point at any
+(`https://api.deepseek.com`) and `DEEPSEEK_MODEL` (`deepseek-v4-flash`; `deepseek-chat` was retired on 2026-07-24) can point at any
 OpenAI-compatible endpoint; the agent only depends on the `LLMProvider` interface.
 
 ### Google Calendar setup (one time)
