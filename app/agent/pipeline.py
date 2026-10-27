@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db.models import MessageSource, User, VoiceMessage
 from app.db.session import session_scope
 from app.tools.google_calendar import GoogleCalendarClient
+from app.tools.resend_client import ResendClient
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,36 @@ def get_calendar() -> GoogleCalendarClient | None:
         log.warning("Google Calendar is not configured; scheduling will fail at execution time")
         return None
     return GoogleCalendarClient.from_settings(settings)
+
+
+@lru_cache
+def get_mailer() -> ResendClient | None:
+    try:
+        return ResendClient.from_settings()
+    except ValueError as exc:
+        log.warning("Email is not configured: %s", exc)
+        return None
+
+
+async def take_pending_edit(user: User) -> dict | None:
+    """If the owner tapped Edit on a recent preview, return that action once (then mark it consumed)."""
+    from sqlalchemy import func, select
+
+    from app.db.models import AgentRun, RunStatus
+
+    ttl = get_settings().confirmation_ttl_min
+    async with session_scope() as s:
+        run = (await s.execute(
+            select(AgentRun)
+            .where(AgentRun.user_id == user.id, AgentRun.status == RunStatus.REJECTED.value,
+                   AgentRun.error == "edit_requested",
+                   AgentRun.updated_at > func.now() - func.make_interval(0, 0, 0, 0, 0, ttl))
+            .order_by(AgentRun.id.desc()).limit(1).with_for_update()
+        )).scalar_one_or_none()
+        if run is None:
+            return None
+        run.error = "edit_consumed"
+        return run.action_json
 
 
 @lru_cache
@@ -45,5 +76,12 @@ async def build_context(user: User, transcript: str, *, editing: dict | None = N
 
 async def process_message(user: User, message_id: int, transcript: str, *, editing: dict | None = None,
                           agent: Agent | None = None) -> AgentOutcome:
+    if editing is None:
+        editing = await take_pending_edit(user)
     context = await build_context(user, transcript, editing=editing)
     return await (agent or get_agent()).run(user=user, message_id=message_id, transcript=transcript, context=context)
+
+
+async def after_execution(run_id: int) -> None:
+    """Hook for post-execution memory updates (see memory batch)."""
+    return None

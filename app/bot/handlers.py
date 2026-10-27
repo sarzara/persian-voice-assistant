@@ -21,6 +21,9 @@ from app.db.session import session_scope
 from app.stt.service import SttOutcome, SttResult, transcribe_voice_message
 from app.agent import pipeline
 from app.agent.agent import AgentOutcome
+from app.agent import executor
+from app.agent.executor import ExecStatus
+from app.bot import preview
 from telegram.constants import ChatAction
 
 log = logging.getLogger(__name__)
@@ -133,16 +136,12 @@ async def respond_to(update: Update, context: ContextTypes.DEFAULT_TYPE, db_user
     if context is not None and chat is not None:
         await context.bot.send_chat_action(chat.id, ChatAction.TYPING)
     try:
-        outcome = await pipeline.process_message(db_user, message_id, transcript, **_editing_kwargs(context))
+        outcome = await pipeline.process_message(db_user, message_id, transcript)
     except ValueError as exc:  # e.g. DEEPSEEK_API_KEY missing
         log.error("Agent not available: %s", exc)
         await update.effective_message.reply_text(msg.AGENT_UNAVAILABLE)
         return
     await render_outcome(update, context, outcome)
-
-
-def _editing_kwargs(context) -> dict:
-    return {}
 
 
 async def render_outcome(update: Update, context, outcome: AgentOutcome) -> None:
@@ -151,9 +150,55 @@ async def render_outcome(update: Update, context, outcome: AgentOutcome) -> None
     if outcome.kind == "question":
         await message.reply_text(outcome.question)
     elif outcome.kind == "action":
-        await message.reply_text(msg.ACTION_PROPOSED.format(action=outcome.action.model_dump_json(indent=1)))
+        await message.reply_text(
+            preview.render_preview(outcome.action, notes=getattr(outcome, "notes", None)),
+            reply_markup=preview.keyboard(outcome.run_id),
+        )
     else:
         await message.reply_text(msg.AGENT_FAILED)
+
+
+async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Confirm / Edit / Cancel buttons under a preview."""
+    query = update.callback_query
+    parsed = preview.parse_callback(query.data)
+    if parsed is None:
+        await query.answer()
+        return
+    run_id, choice = parsed
+    tg_id = update.effective_user.id
+
+    if choice == preview.CONFIRM:
+        await query.answer("در حال انجام…")
+        # Remove the buttons first, so the preview cannot be tapped again while we work.
+        await query.edit_message_reply_markup(reply_markup=None)
+        result = await executor.confirm_and_execute(
+            run_id, tg_id, calendar=pipeline.get_calendar(), mailer=pipeline.get_mailer()
+        )
+        text = {
+            ExecStatus.EXECUTED: lambda: preview.render_executed(result.action, result.data),
+            ExecStatus.ALREADY_DONE: lambda: msg.ALREADY_DONE,
+            ExecStatus.CANCELLED: lambda: msg.ALREADY_CANCELLED,
+            ExecStatus.EXPIRED: lambda: msg.EXPIRED,
+            ExecStatus.NOT_FOUND: lambda: msg.RUN_NOT_FOUND,
+            ExecStatus.FAILED: lambda: preview.render_failure(result.error),
+        }[result.status]()
+        await query.message.reply_text(text)
+        if result.status is ExecStatus.EXECUTED:
+            await pipeline.after_execution(run_id)
+        return
+
+    await query.answer()
+    result = await executor.reject_run(run_id, tg_id, "edit_requested" if choice == preview.EDIT else "cancelled")
+    await query.edit_message_reply_markup(reply_markup=None)
+    if result.status is ExecStatus.ALREADY_DONE:
+        await query.message.reply_text(msg.ALREADY_DONE)
+    elif result.status is ExecStatus.NOT_FOUND:
+        await query.message.reply_text(msg.RUN_NOT_FOUND)
+    elif choice == preview.EDIT:
+        await query.message.reply_text(msg.EDIT_PROMPT)
+    else:
+        await query.message.reply_text(msg.CANCELLED)
 
 
 async def unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

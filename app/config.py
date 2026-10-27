@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     llm_timeout_s: float = Field(default=30.0, gt=0)
     llm_max_retries: int = Field(default=3, ge=0, le=6)
     agent_max_steps: int = Field(default=6, ge=1, le=6)
+    # A preview older than this can no longer be confirmed ("tomorrow" would be stale).
+    confirmation_ttl_min: int = Field(default=60, gt=0)
 
     # Google Calendar (OAuth 2.0, Desktop app client; see scripts/google_auth.py)
     google_client_id: str = ""

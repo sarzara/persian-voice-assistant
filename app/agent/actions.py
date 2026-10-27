@@ -73,7 +73,8 @@ class EmailAction(_Strict):
     type: Literal["email"] = "email"
     to: Person = Field(description="Exactly one recipient")
     subject: str = Field(min_length=1, max_length=200, description="Persian")
-    body: str = Field(min_length=1, max_length=5000, description="Persian")
+    # Capped so the full body always fits in one Telegram preview: the owner confirms exactly what is sent.
+    body: str = Field(min_length=1, max_length=3000, description="Persian")
 
     def emails(self) -> set[str]:
         return {self.to.email}

@@ -143,3 +143,27 @@ async def test_oversized_voice_rejected_without_download(tmp_path):
     await handlers.voice(update, None)
     voice.get_file.assert_not_called()
     update.effective_message.reply_text.assert_awaited_once_with(msg.VOICE_TOO_LARGE)
+
+
+async def test_confirm_button_removes_keyboard_before_executing(monkeypatch):
+    from app.agent.executor import ExecResult, ExecStatus
+
+    order = []
+    message = SimpleNamespace(reply_text=AsyncMock(side_effect=lambda t: order.append(("reply", t))))
+    query = SimpleNamespace(
+        data="run:7:confirm", message=message,
+        answer=AsyncMock(),
+        edit_message_reply_markup=AsyncMock(side_effect=lambda reply_markup: order.append(("buttons_removed", None))),
+    )
+
+    async def fake_exec(run_id, tg_id, calendar, mailer):
+        order.append(("execute", run_id))
+        return ExecResult(ExecStatus.ALREADY_DONE)
+
+    monkeypatch.setattr(handlers.executor, "confirm_and_execute", fake_exec)
+    monkeypatch.setattr(handlers.pipeline, "get_calendar", lambda: None)
+    monkeypatch.setattr(handlers.pipeline, "get_mailer", lambda: None)
+    update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=ALLOWED))
+    await handlers.on_callback(update, None)
+    assert [o[0] for o in order] == ["buttons_removed", "execute", "reply"]
+    assert order[2][1] == msg.ALREADY_DONE
