@@ -9,3 +9,5 @@ pydantic==2.14.1
 pydantic-settings==2.16.1
 httpx==0.28.1
 vosk==0.3.45
+jdatetime==6.1.1
+tzdata==2026.5

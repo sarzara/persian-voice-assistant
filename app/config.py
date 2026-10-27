@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     llm_max_retries: int = Field(default=3, ge=0, le=6)
     agent_max_steps: int = Field(default=6, ge=1, le=6)
 
+    # Google Calendar (OAuth 2.0, Desktop app client; see scripts/google_auth.py)
+    google_client_id: str = ""
+    google_client_secret: SecretStr = SecretStr("")
+    google_refresh_token: SecretStr = SecretStr("")
+    google_calendar_id: str = "primary"
+
+    @property
+    def google_calendar_configured(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret.get_secret_value()
+                    and self.google_refresh_token.get_secret_value())
+
     @field_validator("allowed_user_ids_raw")
     @classmethod
     def _validate_ids(cls, v: str) -> str:

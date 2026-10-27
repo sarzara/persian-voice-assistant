@@ -162,6 +162,7 @@ class ToolCall(IdMixin, TimestampMixin, Base):
     )
     # Unique: a retried confirmation can never create a second event or send a second email.
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
 
 
 class CalendarEvent(IdMixin, TimestampMixin, Base):

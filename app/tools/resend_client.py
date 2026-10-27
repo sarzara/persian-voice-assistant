@@ -85,6 +85,7 @@ class ResendClient:
         text: str,
         html: str | None = None,
         idempotency_key: str | None = None,
+        reply_to: str | None = None,
     ) -> SentEmail:
         recipients = [to] if isinstance(to, str) else list(to)
         if not recipients:
@@ -93,6 +94,8 @@ class ResendClient:
         payload: dict[str, object] = {"from": self._from, "to": recipients, "subject": subject, "text": text}
         if html is not None:
             payload["html"] = html
+        if reply_to:
+            payload["reply_to"] = reply_to
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else {}
 
         attempts = self._max_attempts if idempotency_key else 1
