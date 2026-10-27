@@ -41,3 +41,5 @@ models/
 Thumbs.db
 evals/results/*
 !evals/results/.gitkeep
+.deploy/
+deploy/backup.env
