@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     llm_prices: str = ""
     # A preview older than this can no longer be confirmed ("tomorrow" would be stale).
     confirmation_ttl_min: int = Field(default=60, gt=0)
+    # Show 👍/👎 under bot replies (stored in run_feedback, shown on the dashboard)
+    feedback_buttons: bool = True
 
     # Google Calendar (OAuth 2.0, Desktop app client; see scripts/google_auth.py)
     google_client_id: str = ""

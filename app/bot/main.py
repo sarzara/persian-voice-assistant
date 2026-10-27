@@ -60,6 +60,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("start", handlers.start, filters=private))
     app.add_handler(CommandHandler("help", handlers.help_command, filters=private))
     app.add_handler(CallbackQueryHandler(handlers.on_callback, pattern=r"^run:"))
+    app.add_handler(CallbackQueryHandler(handlers.on_feedback, pattern=r"^fb:"))
     app.add_handler(MessageHandler(private & filters.VOICE, handlers.voice))
     app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, handlers.text_message))
     app.add_handler(MessageHandler(private & ~filters.COMMAND, handlers.unsupported))

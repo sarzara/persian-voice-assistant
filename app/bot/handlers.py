@@ -199,7 +199,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             ExecStatus.NOT_FOUND: lambda: msg.RUN_NOT_FOUND,
             ExecStatus.FAILED: lambda: preview.render_failure(result.error),
         }[result.status]()
-        await query.message.reply_text(text)
+        markup = preview.feedback_keyboard(run_id) if result.status in (ExecStatus.EXECUTED, ExecStatus.FAILED) else None
+        await query.message.reply_text(text, reply_markup=markup)
         if result.status is ExecStatus.EXECUTED:
             await pipeline.after_execution(run_id)
         return
@@ -215,6 +216,30 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await query.message.reply_text(msg.EDIT_PROMPT)
     else:
         await query.message.reply_text(msg.CANCELLED)
+
+
+async def on_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """👍/👎 under a reply: one rating per run, the last tap wins."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.db.models import AgentRun, RunFeedback
+
+    query = update.callback_query
+    parsed = preview.parse_feedback(query.data)
+    if parsed is None:
+        await query.answer()
+        return
+    run_id, rating = parsed
+    async with session_scope() as session:
+        db_user = await upsert_user(session, update.effective_user.id)
+        run = await session.get(AgentRun, run_id)
+        if run is None or run.user_id != db_user.id:
+            await query.answer(msg.RUN_NOT_FOUND)
+            return
+        stmt = pg_insert(RunFeedback).values(run_id=run_id, user_id=db_user.id, rating=rating)
+        await session.execute(stmt.on_conflict_do_update(index_elements=[RunFeedback.run_id],
+                                                         set_={"rating": stmt.excluded.rating}))
+    await query.answer(msg.FEEDBACK_THANKS)
 
 
 async def unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

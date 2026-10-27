@@ -143,11 +143,11 @@ class Agent:
             parsed = validate_terminal(call.name, raw)
         except ValidationError as exc:
             err = format_validation_error(exc)
-            self._log_terminal(session, run_id, call, raw, False, err)
+            self._log_terminal(session, run_id, call, raw, False, err, kind="schema")
             return {"ok": False, "error": err}, None
         except ValueError:
             err = "arguments are not valid JSON"
-            self._log_terminal(session, run_id, call, raw, False, err)
+            self._log_terminal(session, run_id, call, raw, False, err, kind="json")
             return {"ok": False, "error": err}, None
 
         if isinstance(parsed, Clarification):
@@ -157,17 +157,18 @@ class Agent:
         problems = check_action(parsed, allowed_emails=allowed_emails, now=now, tz=tz)
         if problems:
             err = " ".join(problems)
-            self._log_terminal(session, run_id, call, raw, False, err)
+            self._log_terminal(session, run_id, call, raw, False, err, kind="guardrail")
             log.info("Run %s: action rejected by guardrails: %s", run_id, err)
             return {"ok": False, "error": err}, None
         self._log_terminal(session, run_id, call, raw, True, None)
         return {"ok": True, "status": "shown to the owner for confirmation"}, AgentOutcome("action", run_id, action=parsed)
 
     @staticmethod
-    def _log_terminal(session, run_id, call, raw, ok, error):
+    def _log_terminal(session, run_id, call, raw, ok, error, kind=None):
+        # kind: "schema" / "json" = the model's output was invalid; "guardrail" = valid but refused by policy.
         session.add(ToolCall(
             run_id=run_id, tool_name=call.name, arguments_json=raw if isinstance(raw, dict) else {},
-            result_json={"accepted": True} if ok else {"error": error},
+            result_json={"accepted": True} if ok else {"error": error, "kind": kind},
             status=(ToolCallStatus.SUCCEEDED if ok else ToolCallStatus.FAILED).value,
             idempotency_key=f"run{run_id}:{call.name}:{uuid.uuid4().hex}"[:128], latency_ms=0,
         ))

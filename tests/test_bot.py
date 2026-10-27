@@ -71,7 +71,9 @@ async def test_text_goes_through_agent_and_question_is_sent_plain(db, monkeypatc
     update = make_update(ALLOWED, text="  فردا با علی جلسه  ")
     await handlers.text_message(update, None)
     assert seen["user"] == ALLOWED and seen["transcript"] == "فردا با علی جلسه" and seen["message_id"]
-    update.effective_message.reply_text.assert_awaited_once_with("<b>چه ساعتی؟</b>", reply_markup=None)
+    args, kwargs = update.effective_message.reply_text.await_args
+    assert args == ("<b>چه ساعتی؟</b>",)  # plain text, no parse_mode
+    assert [b.callback_data for b in kwargs["reply_markup"].inline_keyboard[0]] == ["fb:1:up", "fb:1:down"]
 
 
 async def test_start_creates_user_and_greets_in_persian(db):
@@ -149,7 +151,7 @@ async def test_confirm_button_removes_keyboard_before_executing(monkeypatch):
     from app.agent.executor import ExecResult, ExecStatus
 
     order = []
-    message = SimpleNamespace(reply_text=AsyncMock(side_effect=lambda t: order.append(("reply", t))))
+    message = SimpleNamespace(reply_text=AsyncMock(side_effect=lambda t, **kw: order.append(("reply", t))))
     query = SimpleNamespace(
         data="run:7:confirm", message=message,
         answer=AsyncMock(),

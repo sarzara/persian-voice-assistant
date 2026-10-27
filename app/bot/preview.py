@@ -12,12 +12,37 @@ from app.tools.persian import fa_digits, jalali_text
 CONFIRM, EDIT, CANCEL = "confirm", "edit", "cancel"
 
 
+def _feedback_enabled() -> bool:
+    from app.config import get_settings
+
+    return get_settings().feedback_buttons
+
+
+def feedback_row(run_id: int) -> list[InlineKeyboardButton]:
+    return [InlineKeyboardButton("👍", callback_data=f"fb:{run_id}:up"),
+            InlineKeyboardButton("👎", callback_data=f"fb:{run_id}:down")]
+
+
+def feedback_keyboard(run_id: int) -> InlineKeyboardMarkup | None:
+    return InlineKeyboardMarkup([feedback_row(run_id)]) if _feedback_enabled() else None
+
+
 def keyboard(run_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
+    rows = [[
         InlineKeyboardButton("✅ تأیید", callback_data=f"run:{run_id}:{CONFIRM}"),
         InlineKeyboardButton("✏️ ویرایش", callback_data=f"run:{run_id}:{EDIT}"),
         InlineKeyboardButton("❌ لغو", callback_data=f"run:{run_id}:{CANCEL}"),
-    ]])
+    ]]
+    if _feedback_enabled():
+        rows.append(feedback_row(run_id))
+    return InlineKeyboardMarkup(rows)
+
+
+def parse_feedback(data: str) -> tuple[int, int] | None:
+    parts = (data or "").split(":")
+    if len(parts) != 3 or parts[0] != "fb" or not parts[1].isdigit() or parts[2] not in ("up", "down"):
+        return None
+    return int(parts[1]), 1 if parts[2] == "up" else -1
 
 
 def parse_callback(data: str) -> tuple[int, str] | None:
@@ -92,7 +117,7 @@ def outcome_message(outcome) -> tuple[str, InlineKeyboardMarkup | None]:
     from app.bot import messages as msg
 
     if outcome.kind == "question":
-        return outcome.question, None
+        return outcome.question, feedback_keyboard(outcome.run_id)
     if outcome.kind == "action":
         return render_preview(outcome.action, notes=outcome.notes), keyboard(outcome.run_id)
-    return msg.AGENT_FAILED, None
+    return msg.AGENT_FAILED, feedback_keyboard(outcome.run_id)

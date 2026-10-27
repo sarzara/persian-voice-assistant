@@ -273,3 +273,15 @@ class LlmCall(IdMixin, TimestampMixin, Base):
     attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("1"))
     status: Mapped[str] = mapped_column(String(8), nullable=False)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class RunFeedback(IdMixin, TimestampMixin, Base):
+    """Optional 👍/👎 the owner taps under a bot reply. One per run (the last tap wins)."""
+
+    __tablename__ = "run_feedback"
+    __table_args__ = (CheckConstraint("rating IN (-1, 1)", name="rating_valid"),)
+
+    run_id: Mapped[int] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), unique=True, nullable=False)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
