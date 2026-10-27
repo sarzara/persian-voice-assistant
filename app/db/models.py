@@ -285,3 +285,20 @@ class RunFeedback(IdMixin, TimestampMixin, Base):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     comment: Mapped[str | None] = mapped_column(Text)
+
+
+class BudgetAlert(IdMixin, TimestampMixin, Base):
+    """One row per (period, period start, threshold): guarantees each alert is sent once."""
+
+    __tablename__ = "budget_alerts"
+    __table_args__ = (
+        UniqueConstraint("period", "period_start", "threshold", name="uq_budget_alerts_period_start_threshold"),
+        CheckConstraint("period IN ('daily', 'monthly')", name="period_valid"),
+    )
+
+    period: Mapped[str] = mapped_column(String(8), nullable=False)
+    period_start: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    threshold: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    used_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    limit_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sent: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))

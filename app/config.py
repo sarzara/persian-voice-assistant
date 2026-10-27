@@ -77,6 +77,17 @@ class Settings(BaseSettings):
     # USD per 1M tokens, JSON: {"model": {"input": 0.15, "cached_input": 0.003, "output": 0.60}}.
     # Merged over built-in defaults (app/agent/usage.py). Unknown models are logged with cost NULL.
     llm_prices: str = ""
+
+    # Token budgets (prompt + completion, owner's timezone). 0 disables a budget.
+    token_budget_daily: int = Field(default=0, ge=0)
+    token_budget_monthly: int = Field(default=0, ge=0)
+    budget_alert_thresholds: str = "80,100"
+    # Refuse new requests once a budget reaches 100 % (confirming an existing preview still works)
+    budget_hard_stop: bool = False
+
+    @property
+    def budget_alert_thresholds_list(self) -> list[int]:
+        return sorted({int(x) for x in self.budget_alert_thresholds.split(",") if x.strip()})
     # A preview older than this can no longer be confirmed ("tomorrow" would be stale).
     confirmation_ttl_min: int = Field(default=60, gt=0)
     # Show 👍/👎 under bot replies (stored in run_feedback, shown on the dashboard)

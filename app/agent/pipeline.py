@@ -71,6 +71,9 @@ async def store_text_message(user: User, text: str) -> int:
 
 async def process_message(user: User, message_id: int, transcript: str, *, editing: dict | None = None,
                           agent: Agent | None = None) -> AgentOutcome:
+    from app.budget import ensure_within_budget
+
+    await ensure_within_budget()  # raises BudgetExceeded when the hard stop is active
     if editing is None:
         editing = await take_pending_edit(user)
     context = await memory.build_context(user, transcript, current_message_id=message_id, editing=editing)

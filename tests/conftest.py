@@ -15,7 +15,7 @@ from app.db import session as db_session
 
 TABLES = (
     "users", "contacts", "voice_messages", "agent_runs", "tool_calls",
-    "calendar_events", "emails", "memory_facts", "audit_events", "llm_calls", "run_feedback",
+    "calendar_events", "emails", "memory_facts", "audit_events", "llm_calls", "run_feedback", "budget_alerts",
 )
 
 

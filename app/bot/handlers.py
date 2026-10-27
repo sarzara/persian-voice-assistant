@@ -15,6 +15,7 @@ from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from app.bot import messages as msg
 from app.bot.ratelimit import RateLimiter
+from app.budget import BudgetExceeded
 from app.config import get_settings
 from app.logging_setup import new_request_id, request_id_var, set_run_id
 from app.db.models import VoiceMessage
@@ -161,6 +162,11 @@ async def respond_to(update: Update, context: ContextTypes.DEFAULT_TYPE, db_user
         await context.bot.send_chat_action(chat.id, ChatAction.TYPING)
     try:
         outcome = await pipeline.process_message(db_user, message_id, transcript)
+    except BudgetExceeded as exc:
+        log.warning("Request refused: %s", exc)
+        await update.effective_message.reply_text(
+            msg.BUDGET_STOP_DAILY if exc.period == "daily" else msg.BUDGET_STOP_MONTHLY)
+        return
     except ValueError as exc:  # e.g. DEEPSEEK_API_KEY missing
         log.error("Agent not available: %s", exc)
         await update.effective_message.reply_text(msg.AGENT_UNAVAILABLE)

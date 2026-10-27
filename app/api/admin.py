@@ -113,8 +113,12 @@ async def retry_run(run_id: int, session: AsyncSession = Depends(db_session)):
     user = await session.get(User, run.user_id)
     await audit(session, "run.retry", "api:admin", run_id=run_id, kind="agent")
     await session.commit()
+    from app.budget import BudgetExceeded
+
     try:
         outcome = await pipeline.process_message(user, vm.id, vm.transcript)
+    except BudgetExceeded as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "LLM provider not configured") from exc
     notified = await notify.send_outcome(user.telegram_user_id, outcome) if outcome.kind != "failed" else False
