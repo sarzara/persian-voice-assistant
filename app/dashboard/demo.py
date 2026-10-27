@@ -166,10 +166,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m app.dashboard.demo")
     parser.add_argument("--purge", action="store_true", help="delete all demo data")
     parser.add_argument("--days", type=int, default=30)
+    parser.add_argument("--if-empty", action="store_true",
+                        help="seed only when the database has no runs at all (used by compose on first start)")
     args = parser.parse_args()
 
     async def go():
         try:
+            if args.if_empty:
+                async with session_scope() as s:
+                    if (await s.execute(select(AgentRun.id).limit(1))).first() is not None:
+                        print("Runs exist: demo data not seeded.")
+                        return
             if args.purge:
                 print(f"Removed demo user ({await purge()} row).")
             else:

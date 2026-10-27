@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     # Signs session cookies and Telegram login links (shared by bot and dashboard)
     dashboard_secret_key: SecretStr = SecretStr("")
     dashboard_session_hours: int = Field(default=12, ge=1, le=168)
+    # Seed 30 days of demo data on first start when the database has no runs (compose 'migrate' step)
+    demo_data: bool = False
     dashboard_db_user: str = "dashboard_ro"
     dashboard_db_password: SecretStr = SecretStr("")
 

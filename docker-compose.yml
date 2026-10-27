@@ -31,7 +31,8 @@ services:
   # so the schema is always current and only one process ever runs Alembic.
   migrate:
     <<: *app
-    command: ["alembic", "upgrade", "head"]
+    # Schema, then the dashboard's read-only role, then demo data on a fresh database (DEMO_DATA=true).
+    command: ["sh", "deploy/migrate.sh"]
     restart: "no"
     depends_on:
       db:
@@ -74,6 +75,43 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Usage & quality dashboard (read-only role). Locally: http://127.0.0.1:8080
+  dashboard:
+    <<: *app
+    command: ["uvicorn", "app.dashboard.app:app", "--host", "0.0.0.0", "--port", "8080",
+              "--proxy-headers", "--forwarded-allow-ips", "*"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # HTTPS reverse proxy for DASHBOARD_HOST. Not needed locally; enable with:
+  #   docker compose --profile proxy up -d
+  caddy:
+    image: caddy:2.10.2
+    profiles: ["proxy"]
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - dashboard
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
   voice:

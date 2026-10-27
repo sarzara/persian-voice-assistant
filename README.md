@@ -172,6 +172,29 @@ a TTY and corrupts the stdio protocol.
 
 Cursor and other clients take the same URL and header. Do not expose port 8001 beyond localhost.
 
+## Usage & quality dashboard
+
+A read-only dashboard for token consumption, cost, latency and model quality, served at
+`http://127.0.0.1:8080` locally and at `https://$DASHBOARD_HOST` in production (Caddy, Let's Encrypt).
+
+- **Sign in (owner only):** a password (`DASHBOARD_PASSWORD_HASH`, create it with
+  `docker compose run --rm --no-deps api python -m app.dashboard.auth hash-password`), or send
+  `/dashboard` to the bot for a one-time link valid for 10 minutes. Everything else answers 303 → login (pages)
+  or 401 (CSV).
+- **Data:** every LLM call is written to `llm_calls` by the provider (tokens, cached tokens, cost from
+  `LLM_PRICES`, latency, attempts, status). Quality signals come from the `run_quality` view (owner
+  decision, JSON failures, guardrail rejections, tool failures, retries, steps, questions) and 👍/👎 in
+  `run_feedback`. The dashboard connects as the read-only role `DASHBOARD_DB_USER` and never shows API keys
+  or audio; full email bodies appear only on a run's detail page.
+- **Budgets:** `TOKEN_BUDGET_DAILY` / `TOKEN_BUDGET_MONTHLY` with progress bars; a Telegram alert to the owner
+  at each `BUDGET_ALERT_THRESHOLDS` (80, 100 %) once per period; `BUDGET_HARD_STOP=true` makes the bot refuse
+  new requests at 100 %. Budget limits are set in `.env` (the dashboard is read-only).
+- **Demo data:** with `DEMO_DATA=true`, the first start on an empty database seeds 30 days of demo activity.
+  Remove it before real use: `docker compose run --rm --no-deps api python -m app.dashboard.demo --purge`.
+- **Subdomain:** set `DASHBOARD_HOST=usage.example.com` and `ACME_EMAIL`, create a DNS **A record**
+  `usage.example.com → <server IPv4>` (and AAAA for IPv6 if the server has one), open ports 80/443, then
+  `docker compose --profile proxy up -d` (production: see `docs/DEPLOY.md`).
+
 ## Operations
 
 - **Logs** are JSON lines. `request_id` (`tg-<update_id>`, `api-…`, `mcp-…`) and `run_id` follow one

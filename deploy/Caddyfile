@@ -1,0 +1,29 @@
+# Reverse proxy for the usage dashboard on its own subdomain, with automatic HTTPS (Let's Encrypt).
+# DASHBOARD_HOST and ACME_EMAIL come from .env. The API (127.0.0.1:8000) and MCP (127.0.0.1:8001)
+# are deliberately NOT proxied: they stay reachable only from the server itself.
+{
+	email {$ACME_EMAIL}
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$DASHBOARD_HOST} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+
+	# Only the dashboard app; it enforces sign-in on every page.
+	reverse_proxy dashboard:8080 {
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
