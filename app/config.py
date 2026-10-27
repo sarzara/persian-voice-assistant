@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     default_timezone: str = "Asia/Tehran"
     voice_storage_dir: Path = Path("/data/voice")
     log_level: str = "INFO"
+    # "json" (one object per line, for production) or "text" (local reading)
+    log_format: str = Field(default="json", pattern="^(json|text)$")
+
+    # Abuse / runaway protection per Telegram user (messages; button taps are not counted)
+    rate_limit_per_minute: int = Field(default=6, ge=1)
+    rate_limit_per_hour: int = Field(default=60, ge=1)
+    # Leftover audio (e.g. after a crash mid-transcription) is deleted after this many minutes
+    audio_retention_min: int = Field(default=60, ge=1)
+    audio_cleanup_interval_min: int = Field(default=10, ge=1)
 
     # API / admin
     # Required for every /runs, /events, /emails, /contacts call (header X-Admin-Key). Empty = admin API disabled.
@@ -53,7 +62,7 @@ class Settings(BaseSettings):
     # Mean word confidence below this asks the user to repeat.
     stt_min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
     # Longer voices are refused before download: bounds CPU time per message.
-    stt_max_duration_s: int = Field(default=120, gt=0)
+    stt_max_duration_s: int = Field(default=60, gt=0, le=300)
 
     # LLM (DeepSeek, OpenAI-compatible API)
     deepseek_api_key: SecretStr = SecretStr("")

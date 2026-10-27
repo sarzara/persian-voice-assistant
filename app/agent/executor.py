@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.agent.actions import EmailAction, ScheduleAction, parse_action
 from app.config import get_settings
+from app.logging_setup import set_run_id
 from app.db.models import AgentRun, RunStatus, ToolCall, ToolCallStatus, User
 from app.db.repo import audit
 from app.db.session import session_scope
@@ -69,6 +70,7 @@ async def confirm_and_execute(
 ) -> ExecResult:
     settings = get_settings()
     ttl = dt.timedelta(minutes=settings.confirmation_ttl_min)
+    set_run_id(run_id)
 
     # 1) Compare-and-set: exactly one caller moves the run to "confirmed".
     async with session_scope() as s:
@@ -142,6 +144,7 @@ class RetryNotAllowed(Exception):
 async def retry_failed_execution(run_id: int, *, actor: str, calendar: CalendarBackend | None,
                                  mailer: MailBackend | None, now: dt.datetime | None = None) -> ExecResult:
     """Re-run a confirmed action whose execution failed. The owner already confirmed it once."""
+    set_run_id(run_id)
     async with session_scope() as s:
         run = await s.get(AgentRun, run_id)
         if run is None:

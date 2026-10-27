@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
+from app.logging_setup import configure_logging, new_request_id, set_run_id
 from app.db.models import AgentRun, RunStatus, ToolCall, ToolCallStatus, User
 from app.db.repo import audit
 from app.db.session import session_scope
@@ -87,6 +88,8 @@ def build_server(
 
         @functools.wraps(fn)
         async def wrapper(*a, **kw):
+            new_request_id("mcp")
+            set_run_id(None)
             try:
                 return await fn(*a, **kw)
             except OwnerMissing as exc:
@@ -125,6 +128,7 @@ def build_server(
                 s.add(run)
                 await s.flush()
                 run_id = run.id
+                set_run_id(run_id)
                 s.add(ToolCall(run_id=run_id, tool_name=tool, arguments_json=args,
                                status=ToolCallStatus.PENDING.value, idempotency_key=key))
         except IntegrityError:  # a concurrent identical call won the race
@@ -233,8 +237,7 @@ def main() -> None:
 
     settings = get_settings()
     # stdout carries the MCP protocol in stdio mode: logs must go to stderr.
-    logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    configure_logging("mcp", settings.log_level, settings.log_format)
     server = default_server()
     if not args.http:
         server.run("stdio")

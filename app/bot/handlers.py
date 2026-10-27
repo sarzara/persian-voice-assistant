@@ -14,7 +14,9 @@ from telegram.constants import ChatType
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from app.bot import messages as msg
+from app.bot.ratelimit import RateLimiter
 from app.config import get_settings
+from app.logging_setup import new_request_id, request_id_var, set_run_id
 from app.db.models import VoiceMessage
 from app.db.repo import audit, upsert_user
 from app.db.session import session_scope
@@ -32,10 +34,32 @@ log = logging.getLogger(__name__)
 TELEGRAM_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
 
 
+_rate_limiter: RateLimiter | None = None
+
+
+def _limiter() -> RateLimiter:
+    global _rate_limiter
+    if _rate_limiter is None:
+        s = get_settings()
+        _rate_limiter = RateLimiter(s.rate_limit_per_minute, s.rate_limit_per_hour)
+    return _rate_limiter
+
+
 async def allowlist_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Correlation: every log line for this update carries tg-<update_id>; run_id is added once a run exists.
+    request_id_var.set(f"tg-{update.update_id}" if getattr(update, "update_id", None) is not None else new_request_id("tg"))
+    set_run_id(None)
     user = update.effective_user
     allowed = get_settings().allowed_user_ids
     if user is not None and user.id in allowed:
+        # Button taps are cheap and must always work (e.g. Confirm); only messages are limited.
+        if getattr(update, "callback_query", None) is None and update.effective_message is not None:
+            wait = _limiter().check(user.id)
+            if wait:
+                log.warning("Rate limited user_id=%s for %.0fs", user.id, wait)
+                await update.effective_message.reply_text(
+                    msg.RATE_LIMITED.format(minutes=msg.to_persian_digits(max(1, round(wait / 60)))))
+                raise ApplicationHandlerStop
         return  # let the update continue to the normal handlers
 
     log.info("Rejected update from non-allowlisted user_id=%s", user.id if user else None)
@@ -202,6 +226,7 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Unhandled error while processing update", exc_info=context.error)
     if isinstance(update, Update) and update.effective_message is not None:
         try:
-            await update.effective_message.reply_text(msg.GENERIC_ERROR)
+            # Short Persian text plus a reference code that matches request_id in the logs.
+            await update.effective_message.reply_text(msg.GENERIC_ERROR.format(ref=request_id_var.get() or "-"))
         except Exception:  # noqa: BLE001 - the error reply itself must never raise
             log.exception("Failed to send error message to user")

@@ -248,4 +248,4 @@ async def test_unhandled_errors_are_generic(monkeypatch, db):
     monkeypatch.setattr(admin, "run_detail", boom)
     async with client() as c:
         r = await c.get("/runs/1", headers=H)
-    assert r.status_code == 500 and r.json() == {"detail": "internal error"} and "hunter2" not in r.text
+    assert r.status_code == 500 and r.json()["detail"] == "internal error" and "hunter2" not in r.text

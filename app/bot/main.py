@@ -12,19 +12,17 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Mess
 from app.bot import handlers
 from app.bot.messages import COMMANDS
 from app.config import get_settings
+from app.logging_setup import configure_logging
 from app.db.session import get_engine
+from app.stt.cleanup import cleanup_loop
 from app.stt.service import get_recognizer
 
 
-def configure_logging(level: str) -> None:
-    logging.basicConfig(format="%(asctime)s %(levelname)s [%(name)s] %(message)s", level=level)
-    # httpx logs every request URL at INFO, and Telegram URLs contain the bot token.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 async def _post_init(app: Application) -> None:
     await app.bot.set_my_commands([BotCommand(c, d) for c, d in COMMANDS])
+    app.bot_data["audio_cleanup"] = asyncio.create_task(cleanup_loop(), name="audio-cleanup")
     # Load the Vosk model now (a few seconds) instead of on the first voice message,
     # and fail loudly in the logs if it is missing.
     try:
@@ -35,6 +33,9 @@ async def _post_init(app: Application) -> None:
 
 
 async def _post_shutdown(app: Application) -> None:
+    task = app.bot_data.pop("audio_cleanup", None)
+    if task:
+        task.cancel()
     await get_engine().dispose()
 
 
@@ -68,7 +69,7 @@ def build_application() -> Application:
 
 def main() -> None:
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging("bot", settings.log_level, settings.log_format)
     logging.getLogger(__name__).info(
         "Starting bot (long polling), %d allowlisted user(s)", len(settings.allowed_user_ids)
     )

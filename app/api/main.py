@@ -11,12 +11,15 @@ from app.api import health
 from app.api.admin import router as admin_router
 from app.api.schemas import Health
 from app.config import get_settings
+from app.logging_setup import configure_logging, new_request_id, request_id_var, set_run_id
 
 log = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
-    debug = get_settings().debug
+    settings = get_settings()
+    debug = settings.debug
+    configure_logging("api", settings.log_level, settings.log_format)
     app = FastAPI(
         title="Persian Voice Assistant API",
         version="1.0.0",
@@ -26,11 +29,21 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if debug else None,
     )
 
+    @app.middleware("http")
+    async def correlation(request: Request, call_next):
+        incoming = request.headers.get("x-request-id", "")
+        rid = incoming[:64] if incoming.replace("-", "").isalnum() else None
+        request_id_var.set(rid or new_request_id("api"))
+        set_run_id(None)
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id_var.get() or ""
+        return response
+
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:
         # Full details only in the logs; the client gets a generic message.
         log.exception("Unhandled API error on %s %s", request.method, request.url.path)
-        return JSONResponse({"detail": "internal error"}, status_code=500)
+        return JSONResponse({"detail": "internal error", "request_id": request_id_var.get()}, status_code=500)
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:

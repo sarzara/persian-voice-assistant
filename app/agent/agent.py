@@ -36,6 +36,7 @@ from app.agent.context import AgentContext, user_message
 from app.agent.prompts import PROMPT_VERSION, system_prompt
 from app.agent.provider import LLMError, LLMProvider
 from app.config import Settings, get_settings
+from app.logging_setup import set_run_id
 from app.db.models import AgentRun, Contact, Intent, RunStatus, ToolCall, ToolCallStatus, User
 from app.db.session import session_scope
 from app.tools import persian
@@ -76,6 +77,7 @@ class Agent:
             s.add(run)
             await s.flush()
             run_id = run.id
+            set_run_id(run_id)  # every log line from here on carries this run_id
             contact_emails = set((await s.execute(
                 select(Contact.email).where(Contact.user_id == user.id, Contact.email.is_not(None))
             )).scalars())
