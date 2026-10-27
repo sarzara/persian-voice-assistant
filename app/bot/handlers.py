@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.db.models import VoiceMessage
 from app.db.repo import audit, upsert_user
 from app.db.session import session_scope
+from app.stt.service import SttOutcome, SttResult, transcribe_voice_message
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,10 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if voice_obj.file_size and voice_obj.file_size > TELEGRAM_DOWNLOAD_LIMIT_BYTES:
         await message.reply_text(msg.VOICE_TOO_LARGE)
         return
+    max_s = get_settings().stt_max_duration_s
+    if voice_obj.duration and voice_obj.duration > max_s:
+        await message.reply_text(msg.VOICE_TOO_LONG.format(limit=msg.to_persian_digits(max_s)))
+        return
 
     # file_unique_id is stable and filesystem-safe; the user folder keeps audio separable per owner.
     target_dir = Path(get_settings().voice_storage_dir) / str(user.id)
@@ -94,7 +99,19 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         raise
 
     log.info("Stored voice_message id=%s user=%s duration=%ss", record.id, user.id, voice_obj.duration)
-    await message.reply_text(msg.VOICE_SAVED.format(duration=msg.to_persian_digits(voice_obj.duration)))
+    result = await transcribe_voice_message(record.id, path)
+    if not result.usable:
+        await message.reply_text(stt_problem_message(result))
+        return
+    await message.reply_text(msg.TRANSCRIPT.format(text=result.text))
+
+
+def stt_problem_message(result: SttResult) -> str:
+    if result.outcome is SttOutcome.EMPTY:
+        return msg.STT_EMPTY
+    if result.outcome is SttOutcome.LOW_CONFIDENCE:
+        return msg.STT_LOW_CONFIDENCE.format(text=result.text)
+    return msg.STT_FAILED
 
 
 async def echo_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

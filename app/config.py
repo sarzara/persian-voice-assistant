@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     voice_storage_dir: Path = Path("/data/voice")
     log_level: str = "INFO"
 
+    # Speech to text
+    vosk_model_path: Path = Path("/opt/vosk-model")
+    # Mean word confidence below this asks the user to repeat.
+    stt_min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    # Longer voices are refused before download: bounds CPU time per message.
+    stt_max_duration_s: int = Field(default=120, gt=0)
+
     @field_validator("allowed_user_ids_raw")
     @classmethod
     def _validate_ids(cls, v: str) -> str:

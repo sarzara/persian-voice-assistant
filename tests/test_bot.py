@@ -71,7 +71,17 @@ async def test_start_creates_user_and_greets_in_persian(db):
     assert reply.startswith("سلام Test User")
 
 
-async def test_voice_is_downloaded_and_stored(db, tmp_path):
+async def test_voice_is_downloaded_and_stored(db, tmp_path, monkeypatch):
+    from app.stt.service import SttOutcome, SttResult
+
+    seen = {}
+
+    async def fake_stt(vm_id, path):
+        seen["audio"] = Path(path).read_bytes()
+        return SttResult(SttOutcome.OK, "فردا ساعت ده", 0.9)
+
+    monkeypatch.setattr(handlers, "transcribe_voice_message", fake_stt)
+
     async def download_to_drive(custom_path):
         Path(custom_path).write_bytes(b"OggS-fake-audio")
 
@@ -89,10 +99,26 @@ async def test_voice_is_downloaded_and_stored(db, tmp_path):
         row = (await s.execute(select(VoiceMessage))).scalar_one()
         audits = await s.scalar(select(func.count()).select_from(AuditEvent).where(AuditEvent.event_type == "voice.received"))
     assert row.telegram_file_id == "FILE_ID_1" and row.duration_s == 7
-    assert Path(row.audio_path).read_bytes() == b"OggS-fake-audio"
+    assert seen["audio"] == b"OggS-fake-audio"
     assert audits == 1
     reply = update.effective_message.reply_text.await_args.args[0]
-    assert "۷ ثانیه" in reply
+    assert "فردا ساعت ده" in reply
+
+
+async def test_low_confidence_asks_to_repeat_in_persian():
+    from app.stt.service import SttOutcome, SttResult
+
+    text = handlers.stt_problem_message(SttResult(SttOutcome.LOW_CONFIDENCE, "فردا", 0.3))
+    assert "تکرار" in text and "فردا" in text
+    assert "دوباره" in handlers.stt_problem_message(SttResult(SttOutcome.EMPTY))
+
+
+async def test_too_long_voice_refused_before_download():
+    voice = SimpleNamespace(file_size=1000, duration=600, get_file=AsyncMock())
+    update = make_update(ALLOWED, voice=voice)
+    await handlers.voice(update, None)
+    voice.get_file.assert_not_called()
+    assert "طولانی" in update.effective_message.reply_text.await_args.args[0]
 
 
 async def test_oversized_voice_rejected_without_download(tmp_path):
