@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
-from app.agent.agent import Agent, AgentOutcome, now_in
-from app.agent.context import AgentContext
+from app.agent import memory
+from app.agent.agent import Agent, AgentOutcome
 from app.agent.provider import provider_from_settings
 from app.config import get_settings
 from app.db.models import MessageSource, User, VoiceMessage
@@ -69,19 +69,20 @@ async def store_text_message(user: User, text: str) -> int:
         return vm.id
 
 
-async def build_context(user: User, transcript: str, *, editing: dict | None = None) -> AgentContext:
-    return AgentContext(now=now_in(user.timezone or get_settings().default_timezone),
-                        owner_name=user.name, editing=editing)
-
-
 async def process_message(user: User, message_id: int, transcript: str, *, editing: dict | None = None,
                           agent: Agent | None = None) -> AgentOutcome:
     if editing is None:
         editing = await take_pending_edit(user)
-    context = await build_context(user, transcript, editing=editing)
-    return await (agent or get_agent()).run(user=user, message_id=message_id, transcript=transcript, context=context)
+    context = await memory.build_context(user, transcript, current_message_id=message_id, editing=editing)
+    outcome = await (agent or get_agent()).run(user=user, message_id=message_id, transcript=transcript, context=context)
+    if outcome.kind == "action":
+        outcome.notes = await memory.preview_notes(user, outcome.action)
+    return outcome
 
 
 async def after_execution(run_id: int) -> None:
-    """Hook for post-execution memory updates (see memory batch)."""
-    return None
+    """Best effort: a memory failure must never turn a successful action into an error."""
+    try:
+        await memory.after_execution(run_id)
+    except Exception:  # noqa: BLE001
+        log.exception("Post-execution memory update failed for run %s", run_id)

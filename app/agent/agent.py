@@ -15,7 +15,7 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -54,6 +54,7 @@ class AgentOutcome:
     action: ScheduleAction | EmailAction | None = None
     question: str | None = None
     error: str | None = None
+    notes: list[str] = field(default_factory=list)  # shown under the preview (e.g. a contact that will be saved)
 
 
 class Agent:

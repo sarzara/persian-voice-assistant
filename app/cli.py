@@ -2,6 +2,7 @@
 
     python -m app.cli send-test-email            # to OWNER_EMAIL
     python -m app.cli send-test-email --to you@example.com
+    python -m app.cli eval-agent                 # 10 Persian samples against the real LLM
 
 In Docker:  docker compose run --rm api python -m app.cli send-test-email
 """
@@ -73,11 +74,42 @@ async def send_test_email(to: str | None) -> int:
     return 0
 
 
+async def eval_agent(as_json: bool) -> int:
+    import json
+
+    from app.agent.evaluation import run_live_eval
+    from app.db.session import get_engine
+
+    try:
+        results = await run_live_eval()
+    except ValueError as exc:  # missing DEEPSEEK_API_KEY
+        print(f"FAILED: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        await get_engine().dispose()
+
+    if as_json:
+        print(json.dumps(results, ensure_ascii=False, indent=1, default=str))
+    else:
+        for r in results:
+            mark = "PASS" if r["passed"] else "FAIL"
+            print(f"{mark}  {r['id']:<45} {r['kind']:<9} steps={r['steps']} "
+                  f"tokens={r['prompt_tokens']}+{r['completion_tokens']} {r['latency_ms']}ms")
+            if not r["passed"]:
+                print(f"      problems: {r['problems']}\n      detail:   {r['detail']}")
+        passed = sum(r["passed"] for r in results)
+        tokens = sum((r["prompt_tokens"] or 0) + (r["completion_tokens"] or 0) for r in results)
+        print(f"\n{passed}/{len(results)} passed, {tokens} tokens total")
+    return 0 if all(r["passed"] for r in results) else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
     p_test = sub.add_parser("send-test-email", help="send one test email to prove RESEND_API_KEY works")
     p_test.add_argument("--to", help="recipient (default: OWNER_EMAIL)")
+    p_eval = sub.add_parser("eval-agent", help="run the 10 Persian sample requests against the real LLM")
+    p_eval.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=get_settings().log_level, format="%(levelname)s %(message)s")
@@ -85,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "send-test-email":
         return asyncio.run(send_test_email(args.to))
+    if args.command == "eval-agent":
+        return asyncio.run(eval_agent(args.json))
     return 2  # pragma: no cover
 
 

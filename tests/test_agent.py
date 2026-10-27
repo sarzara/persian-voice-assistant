@@ -14,7 +14,7 @@ from app.agent.prompts import PROMPT_VERSION
 from app.agent.provider import LLMError
 from app.db.models import AgentRun, Contact, ToolCall, User
 from app.db.session import session_scope
-from tests.agent_samples import ALI, NOW, SAMPLES, check_expectation
+from app.agent.evaluation import ALI, NOW, SAMPLES, check_expectation
 from tests.fakes import ScriptedProvider, tc
 
 

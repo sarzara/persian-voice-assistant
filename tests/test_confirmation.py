@@ -11,7 +11,7 @@ from app.agent.executor import ExecStatus, confirm_and_execute, execution_key, r
 from app.bot import preview
 from app.db.models import AgentRun, CalendarEvent, Email, ToolCall
 from app.db.session import session_scope
-from tests.agent_samples import NOW, SAMPLES
+from app.agent.evaluation import NOW, SAMPLES
 from tests.fakes import FakeCalendar, FakeMailer, ScriptedProvider
 from tests.test_agent import owner  # noqa: F401  (fixture)
 

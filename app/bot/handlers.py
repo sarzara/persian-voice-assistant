@@ -151,7 +151,7 @@ async def render_outcome(update: Update, context, outcome: AgentOutcome) -> None
         await message.reply_text(outcome.question)
     elif outcome.kind == "action":
         await message.reply_text(
-            preview.render_preview(outcome.action, notes=getattr(outcome, "notes", None)),
+            preview.render_preview(outcome.action, notes=outcome.notes),
             reply_markup=preview.keyboard(outcome.run_id),
         )
     else:

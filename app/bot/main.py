@@ -3,6 +3,7 @@
     python -m app.bot.main
 """
 
+import asyncio
 import logging
 
 from telegram import BotCommand, Update
@@ -12,6 +13,7 @@ from app.bot import handlers
 from app.bot.messages import COMMANDS
 from app.config import get_settings
 from app.db.session import get_engine
+from app.stt.service import get_recognizer
 
 
 def configure_logging(level: str) -> None:
@@ -23,6 +25,13 @@ def configure_logging(level: str) -> None:
 
 async def _post_init(app: Application) -> None:
     await app.bot.set_my_commands([BotCommand(c, d) for c, d in COMMANDS])
+    # Load the Vosk model now (a few seconds) instead of on the first voice message,
+    # and fail loudly in the logs if it is missing.
+    try:
+        recognizer = get_recognizer()
+        await asyncio.to_thread(recognizer._model)
+    except Exception:  # noqa: BLE001 - text messages still work without STT
+        logging.getLogger(__name__).exception("Vosk model could not be loaded; voice messages will fail")
 
 
 async def _post_shutdown(app: Application) -> None:
