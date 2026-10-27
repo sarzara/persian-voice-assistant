@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
+# Base images and package indexes are build arguments so the image can be built where
+# Docker Hub / PyPI / Debian need a mirror (see docs/DEPLOY.md "Outbound access").
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
 # ---- Stage 1: fetch the Vosk Persian model (kept out of the final layer history) ----
-FROM python:3.12-slim AS vosk-model
+FROM ${PYTHON_IMAGE} AS vosk-model
 ARG VOSK_MODEL=vosk-model-small-fa-0.42
 ARG VOSK_MODEL_URL=https://alphacephei.com/vosk/models/${VOSK_MODEL}.zip
 # Optional: pin the archive hash for a reproducible, tamper-evident build.
@@ -22,7 +25,11 @@ shutil.move(f"/tmp/extract/{name}", "/opt/vosk-model")
 PY
 
 # ---- Stage 2: application ----
-FROM python:3.12-slim
+FROM ${PYTHON_IMAGE}
+
+ARG PIP_INDEX_URL=https://pypi.org/simple
+# e.g. http://mirror.example.ir/debian  (empty = Debian's default mirrors)
+ARG APT_MIRROR=
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -30,7 +37,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # ffmpeg converts Telegram OGG/Opus to 16 kHz mono WAV for Vosk.
-RUN apt-get update \
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s#http://deb.debian.org/debian#${APT_MIRROR}#g" /etc/apt/sources.list.d/debian.sources; \
+    fi \
+    && apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -40,9 +50,9 @@ RUN groupadd --system --gid 10001 app \
 
 WORKDIR /app
 
-# Dependencies first: this layer is cached until requirements.txt changes.
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Dependencies first (cached until the lockfile changes). Every package and hash is pinned.
+COPY requirements.lock .
+RUN pip install --index-url "$PIP_INDEX_URL" --require-hashes --no-deps -r requirements.lock
 
 # Model before code: changing code does not re-copy 50 MB.
 COPY --from=vosk-model /opt/vosk-model /opt/vosk-model

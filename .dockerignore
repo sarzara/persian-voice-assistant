@@ -19,3 +19,13 @@ token*.json
 *.pem
 *.key
 backups/
+# Not needed at runtime (smaller image, less to scan)
+tests/
+docs/
+scripts/
+evals/results/
+*.md
+!evals/README.md
+.gitattributes
+.gitignore
+!app/agent/prompts/*.md
