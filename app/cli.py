@@ -4,6 +4,7 @@
     python -m app.cli send-test-email --to you@example.com
     python -m app.cli eval-agent                 # 30 Persian transcripts against the real LLM (accuracy report)
     python -m app.cli eval-agent --quick         # the 10 core samples
+    python -m app.cli check-outbound             # can this server reach Telegram, DeepSeek, Resend, Google?
 
 In Docker:  docker compose run --rm api python -m app.cli send-test-email
 """
@@ -114,11 +115,53 @@ async def eval_agent(as_json: bool, quick: bool = False, out: str | None = None)
     return 0 if all(r["passed"] for r in results) else 1
 
 
+async def check_outbound() -> int:
+    """Reachability of every external service, from inside the container (same proxy settings as the app)."""
+    import os
+    import time
+
+    import httpx
+
+    s = get_settings()
+    token = s.telegram_bot_token.get_secret_value()
+    targets = [
+        ("Telegram Bot API", f"{s.telegram_api_base_url.rstrip('/')}/bot{token}/getMe" if token
+         else s.telegram_api_base_url, {}),
+        ("DeepSeek API", s.deepseek_base_url.rstrip("/") + "/models",
+         {"Authorization": f"Bearer {s.deepseek_api_key.get_secret_value()}"}),
+        ("Resend API", s.resend_api_url.rstrip("/") + "/domains",
+         {"Authorization": f"Bearer {s.resend_api_key.get_secret_value()}"}),
+        ("Google OAuth", "https://oauth2.googleapis.com/token", {}),
+        ("Google Calendar API", "https://www.googleapis.com/calendar/v3/users/me/calendarList", {}),
+    ]
+    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+    print(f"Proxy: {proxy.split('@')[-1] if proxy else 'none'}\n")
+    failures = 0
+    async with httpx.AsyncClient(timeout=10) as client:
+        for name, url, headers in targets:
+            started = time.perf_counter()
+            try:
+                r = await client.get(url, headers={k: v for k, v in headers.items() if v != "Bearer "})
+                ms = int((time.perf_counter() - started) * 1000)
+                # Any HTTP answer (even 401/404/405) proves the network path works.
+                verdict = "OK " if r.status_code < 500 else "ERR"
+                note = {401: " (reachable; key missing/invalid)", 403: " (403: may be a geo/sanctions block)",
+                        405: " (reachable)", 404: " (reachable)"}.get(r.status_code, "")
+                print(f"{verdict} {name:<22} HTTP {r.status_code} in {ms} ms{note}")
+                failures += r.status_code >= 500 or r.status_code == 403
+            except httpx.HTTPError as exc:
+                failures += 1
+                print(f"BLOCKED {name:<18} {exc.__class__.__name__}")
+    print("\nAll reachable." if not failures else f"\n{failures} problem(s): see docs/DEPLOY.md 'Outbound access'.")
+    return 0 if not failures else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
     p_test = sub.add_parser("send-test-email", help="send one test email to prove RESEND_API_KEY works")
     p_test.add_argument("--to", help="recipient (default: OWNER_EMAIL)")
+    sub.add_parser("check-outbound", help="check that Telegram, DeepSeek, Resend and Google are reachable")
     p_eval = sub.add_parser("eval-agent", help="run the 10 Persian sample requests against the real LLM")
     p_eval.add_argument("--json", action="store_true", help="machine-readable output")
     p_eval.add_argument("--quick", action="store_true", help="only the 10 core samples")
@@ -130,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "send-test-email":
         return asyncio.run(send_test_email(args.to))
+    if args.command == "check-outbound":
+        return asyncio.run(check_outbound())
     if args.command == "eval-agent":
         return asyncio.run(eval_agent(args.json, args.quick, args.out))
     return 2  # pragma: no cover

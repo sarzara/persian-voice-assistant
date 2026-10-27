@@ -16,6 +16,9 @@ class Settings(BaseSettings):
 
     # Telegram
     telegram_bot_token: SecretStr = SecretStr("")
+    # Bot API endpoint. Change only to use a gateway/reverse proxy for api.telegram.org
+    # (e.g. where Telegram is blocked); the bot appends /bot<token>/<method>.
+    telegram_api_base_url: str = "https://api.telegram.org"
     # Kept as a raw string: pydantic-settings would otherwise expect JSON for a list.
     allowed_user_ids_raw: str = Field(default="", alias="ALLOWED_USER_IDS")
 
@@ -26,6 +29,7 @@ class Settings(BaseSettings):
 
     # Email (Resend)
     resend_api_key: SecretStr = SecretStr("")
+    resend_api_url: str = "https://api.resend.com"
     email_from: str = ""
 
     # PostgreSQL

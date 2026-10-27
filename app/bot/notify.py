@@ -9,6 +9,11 @@ from telegram import Bot
 from app.bot import preview
 from app.config import get_settings
 
+
+def _bot(token: str) -> Bot:
+    base = get_settings().telegram_api_base_url.rstrip("/")
+    return Bot(token, base_url=f"{base}/bot", base_file_url=f"{base}/file/bot")
+
 log = logging.getLogger(__name__)
 
 
@@ -18,7 +23,7 @@ async def send_outcome(chat_id: int, outcome) -> bool:
         return False
     text, markup = preview.outcome_message(outcome)
     try:
-        async with Bot(token) as bot:
+        async with _bot(token) as bot:
             await bot.send_message(chat_id, text, reply_markup=markup)
         return True
     except Exception:  # noqa: BLE001 - notification is best effort
@@ -31,7 +36,7 @@ async def send_text(chat_id: int, text: str) -> bool:
     if not token:
         return False
     try:
-        async with Bot(token) as bot:
+        async with _bot(token) as bot:
             await bot.send_message(chat_id, text)
         return True
     except Exception:  # noqa: BLE001

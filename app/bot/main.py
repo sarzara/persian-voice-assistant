@@ -47,9 +47,12 @@ def build_application() -> Application:
     if not settings.allowed_user_ids:
         raise SystemExit("ALLOWED_USER_IDS is empty: nobody could use the bot")
 
+    base = settings.telegram_api_base_url.rstrip("/")
     app = (
         Application.builder()
         .token(token)
+        .base_url(f"{base}/bot")
+        .base_file_url(f"{base}/file/bot")
         .post_init(_post_init)
         .post_shutdown(_post_shutdown)
         .build()

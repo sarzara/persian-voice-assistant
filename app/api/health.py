@@ -44,7 +44,7 @@ async def _telegram(transport: httpx.AsyncBaseTransport | None = None) -> str | 
     if not token:
         raise RuntimeError("not configured")
     async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=transport) as c:
-        r = await c.get(f"https://api.telegram.org/bot{token}/getMe")
+        r = await c.get(f"{get_settings().telegram_api_base_url.rstrip('/')}/bot{token}/getMe")
     r.raise_for_status()
     return "@" + r.json()["result"]["username"]
 

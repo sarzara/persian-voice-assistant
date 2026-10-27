@@ -66,6 +66,7 @@ class ResendClient:
     @classmethod
     def from_settings(cls, settings: Settings | None = None, **kwargs) -> ResendClient:
         s = settings or get_settings()
+        kwargs.setdefault("base_url", s.resend_api_url)
         return cls(s.resend_api_key.get_secret_value(), s.email_from, **kwargs)
 
     async def __aenter__(self) -> ResendClient:
