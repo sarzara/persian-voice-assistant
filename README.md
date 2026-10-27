@@ -1,11 +1,14 @@
 # Persian Voice Assistant
 
-A personal Telegram assistant. Send a voice message in Persian ("فردا ساعت ده با علی جلسه بگذار",
-"به سارا ایمیل بزن که گزارش را فردا می‌فرستم"); it transcribes it, turns it into **one** calendar
-event or email, shows you a Persian preview, and acts **only after you tap ✅ تأیید**.
-The full spec is in [docs/SPEC.md](docs/SPEC.md).
+A personal assistant on Telegram. Send a voice message in Persian, for example
+«فردا ساعت ده صبح با علی جلسه بگذار» or «به سارا ایمیل بزن و بگو گزارش را فردا می‌فرستم».
+It transcribes the message, turns it into **one** calendar event or email, shows a Persian preview,
+and acts **only after you tap ✅ تأیید**.
 
-**Status:** batches 01–03: foundation; speech-to-text, agent, tools, confirmation, memory; admin API, MCP server, hardening.
+- **Version:** 1.0.0. Spec: [docs/SPEC.md](docs/SPEC.md). Deployment: [docs/DEPLOY.md](docs/DEPLOY.md).
+- **Stack:** Python 3.12, python-telegram-bot 21, FastAPI, Pydantic v2, PostgreSQL 16, SQLAlchemy 2, Alembic,
+  Vosk (Persian) + ffmpeg, DeepSeek (OpenAI-compatible), Google Calendar API, Resend, MCP Python SDK,
+  Jinja2 + Chart.js, Caddy, Docker Compose.
 
 ## How a message flows
 
@@ -13,46 +16,65 @@ The full spec is in [docs/SPEC.md](docs/SPEC.md).
 voice ──ffmpeg──► 16 kHz WAV ──Vosk (fa)──► transcript + confidence ──► audio deleted
                                                   │ empty / low confidence → "please repeat"
 text ─────────────────────────────────────────────┤
-                                                  ▼
+                                                  ▼   budget hard stop? rate limit?
         context: now (Tehran, Jalali) · preferences · mentioned contacts · last 5 messages
                                                   ▼
   DeepSeek agent (≤ 6 steps, read-only tools) ──► ScheduleAction | EmailAction | question
                                                   ▼   Pydantic + code guardrails
-                          Persian preview  [✅ تأیید] [✏️ ویرایش] [❌ لغو]
+                          Persian preview  [✅ تأیید] [✏️ ویرایش] [❌ لغو]  (+ 👍/👎)
                                                   ▼   Confirm only
            executor (idempotent) ──► Google Calendar / Resend ──► memory facts via tools
+every LLM call ──► llm_calls (tokens, cost, latency) ──► budgets, alerts, dashboard
 ```
 
-## What runs
+## Services
 
-| Service   | What it does                                                      | Exposed            |
-|-----------|-------------------------------------------------------------------|--------------------|
-| `db`      | PostgreSQL 16, data in the `pgdata` named volume                  | not published      |
-| `migrate` | One-shot `alembic upgrade head`, then exits                       | —                  |
-| `bot`     | Telegram worker (long polling): STT, agent, confirmation          | outbound only      |
-| `api`     | FastAPI; `GET /health` checks the database                        | `127.0.0.1:8000`   |
+| Service | Role | Listens on |
+|---|---|---|
+| `db` | PostgreSQL 16 (`pgdata` volume) | internal only |
+| `migrate` | one-shot: `alembic upgrade head`, read-only dashboard role, optional demo data | — |
+| `bot` | Telegram long polling: STT, agent, confirmation, budget alerts, audio cleanup | outbound only |
+| `api` | health checks and the admin API | `127.0.0.1:8000` |
+| `dashboard` | usage & quality dashboard (read-only DB role) | `127.0.0.1:8080` |
+| `caddy` | HTTPS for `DASHBOARD_HOST` (Let's Encrypt) | `:80`, `:443` (profile `proxy` locally, always in prod) |
+| `mcp` | MCP over streamable HTTP for IDEs (Claude Desktop uses stdio) | `127.0.0.1:8001` |
 
-`bot` and `api` start only after `migrate` succeeds, and `migrate` only after `db` is healthy.
+## Quick start (local)
 
-## Quick start
-
-Requirements: Docker Desktop (or Docker Engine + Compose v2). The first build downloads the
-Vosk Persian model (`vosk-model-small-fa-0.42`, 53 MB) from alphacephei.com.
+Requirements: Docker Desktop (or Docker Engine + Compose v2). The first build downloads the Vosk Persian
+model (`vosk-model-small-fa-0.42`, 53 MB).
 
 ```bash
-cp .env.example .env        # then fill it in (sections below)
-docker compose up --build
-docker compose run --rm api python -m app.db.seed       # owner + two sample contacts
+cp .env.example .env         # fill it in (next section)
+docker compose up --build    # db -> migrate -> bot, api, dashboard, mcp
+docker compose run --rm --no-deps api python -m app.db.seed          # owner + two sample contacts
+docker compose run --rm --no-deps api python -m app.cli send-test-email
 ```
 
-Minimum `.env` for batch 02: `TELEGRAM_BOT_TOKEN`, `ALLOWED_USER_IDS`, `OWNER_*`, `POSTGRES_PASSWORD`,
-`RESEND_API_KEY` + `EMAIL_FROM`, `DEEPSEEK_API_KEY`, and the four `GOOGLE_*` values.
+Then open `http://127.0.0.1:8080` (dashboard, with demo data when `DEMO_DATA=true`), send `/start` to the bot, and
+send a voice message.
 
-### DeepSeek
+### Configuration (`.env`)
 
-Create a key at platform.deepseek.com and set `DEEPSEEK_API_KEY`. `DEEPSEEK_BASE_URL`
-(`https://api.deepseek.com`) and `DEEPSEEK_MODEL` (`deepseek-v4-flash`; `deepseek-chat` was retired on 2026-07-24) can point at any
-OpenAI-compatible endpoint; the agent only depends on the `LLMProvider` interface.
+Every variable is listed with comments in [.env.example](.env.example); a test fails if a setting is missing
+there. The groups:
+
+| Group | Variables |
+|---|---|
+| Telegram | `TELEGRAM_BOT_TOKEN`, `ALLOWED_USER_IDS`, `TELEGRAM_API_BASE_URL` |
+| Owner | `OWNER_TELEGRAM_ID`, `OWNER_NAME`, `OWNER_EMAIL` |
+| Email | `RESEND_API_KEY`, `EMAIL_FROM`, `RESEND_API_URL` |
+| LLM | `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL` (default `deepseek-v4-flash`; `deepseek-chat` was retired on 2026-07-24), `DEEPSEEK_EXTRA_BODY`, `LLM_TIMEOUT_S`, `LLM_MAX_RETRIES`, `AGENT_MAX_STEPS`, `LLM_PRICES` |
+| Budget | `TOKEN_BUDGET_DAILY`, `TOKEN_BUDGET_MONTHLY`, `BUDGET_ALERT_THRESHOLDS`, `BUDGET_HARD_STOP` |
+| Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GOOGLE_CALENDAR_ID` |
+| Database | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_HOST`, `POSTGRES_PORT` |
+| Admin / MCP | `ADMIN_API_KEY`, `DEBUG`, `MCP_API_KEY` |
+| Dashboard | `DASHBOARD_HOST`, `ACME_EMAIL`, `DASHBOARD_PASSWORD_HASH`, `DASHBOARD_SECRET_KEY`, `DASHBOARD_SESSION_HOURS`, `DEMO_DATA`, `DASHBOARD_DB_USER`, `DASHBOARD_DB_PASSWORD` |
+| Speech | `VOSK_MODEL_PATH`, `STT_MIN_CONFIDENCE`, `STT_MAX_DURATION_S` (60) |
+| Behaviour | `DEFAULT_TIMEZONE`, `CONFIRMATION_TTL_MIN`, `FEEDBACK_BUTTONS`, `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_HOUR`, `AUDIO_RETENTION_MIN`, `AUDIO_CLEANUP_INTERVAL_MIN`, `VOICE_STORAGE_DIR`, `LOG_LEVEL`, `LOG_FORMAT` |
+| Network | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (HTTP or SOCKS5 for all outbound API calls) |
+
+Keep OAuth client files in `secrets/` (git- and Docker-ignored). `.env` is never committed.
 
 ### Google Calendar setup (one time)
 
@@ -61,7 +83,8 @@ OpenAI-compatible endpoint; the agent only depends on the `LLMProvider` interfac
 2. **OAuth consent screen**: User type *External*; add your Google account under *Test users*.
 3. **Credentials → Create credentials → OAuth client ID → Application type: Desktop app.**
    Put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
-4. On your computer (not in Docker), with Python 3.9+ and no extra packages:
+4. Download the client JSON ("Download JSON") into `secrets/credentials.json` (git- and Docker-ignored), or put the
+   ID and secret in `.env`. On your computer (not in Docker), with Python 3.9+ and no extra packages:
    ```bash
    python scripts/google_auth.py
    ```
@@ -79,12 +102,13 @@ OpenAI-compatible endpoint; the agent only depends on the `LLMProvider` interfac
 Events are created in **Asia/Tehran** time with the guests as attendees and `sendUpdates=all`,
 so Google emails the invitations.
 
-### Resend
+### DeepSeek and Resend
 
-`EMAIL_FROM` must be on a domain verified in Resend (until then, `onboarding@resend.dev` can only
-send to your own Resend account address). Replies to assistant emails go to `OWNER_EMAIL` (reply-to).
+DeepSeek: create a key at platform.deepseek.com; `GET /health` verifies that `DEEPSEEK_MODEL` is offered.
+Resend: `EMAIL_FROM` must use a domain verified in Resend (until then `onboarding@resend.dev` only sends to
+your own Resend address). Replies to assistant emails go to `OWNER_EMAIL`.
 
-## Using it
+## Using the bot
 
 - Voice or text: "پنجشنبه ساعت ۳ بعدازظهر یک جلسه یک ساعته با سارا درباره بودجه بگذار".
 - If something is missing (time, an unknown person's email), the bot asks one Persian question;
@@ -94,6 +118,8 @@ send to your own Resend account address). Replies to assistant emails go to `OWN
   A preview expires after `CONFIRMATION_TTL_MIN` (60) minutes.
 - Speech recognition rarely gets email addresses right. For a new person, **type** the address
   ("ایمیل رضا reza@example.org است"); it is saved as a contact after the action runs.
+- `/dashboard` (owner only) sends a one-time sign-in link for the dashboard.
+- 👍/👎 under replies feed the dashboard's quality table.
 
 ## Agent design
 
@@ -195,6 +221,21 @@ A read-only dashboard for token consumption, cost, latency and model quality, se
   `usage.example.com → <server IPv4>` (and AAAA for IPv6 if the server has one), open ports 80/443, then
   `docker compose --profile proxy up -d` (production: see `docs/DEPLOY.md`).
 
+## Evaluation
+
+`evals/persian_eval_30.jsonl` holds 30 Persian transcripts with the expected JSON (17 meetings, 6 emails,
+7 clarifying questions, including Jalali dates, AM/PM words, colloquial and mixed-language phrasing, STT noise
+and three injection attempts) on a fixed clock. Run it against the configured model:
+
+```bash
+docker compose run --rm api python -m app.cli eval-agent                 # Markdown report: intent/date/time/... accuracy
+docker compose run --rm api python -m app.cli eval-agent --out /tmp/r.md
+```
+
+See [evals/README.md](evals/README.md) for metric definitions. Offline tests replay the same items through
+the real agent loop with an oracle model to verify the scoring and the guardrails; **only a live run
+measures the model**.
+
 ## Operations
 
 - **Logs** are JSON lines. `request_id` (`tg-<update_id>`, `api-…`, `mcp-…`) and `run_id` follow one
@@ -206,93 +247,99 @@ A read-only dashboard for token consumption, cost, latency and model quality, se
 - **Audio retention**: transcribed audio is deleted immediately; a job in the bot deletes anything left
   older than `AUDIO_RETENTION_MIN` (60) minutes.
 
-## Everyday commands
+Useful commands:
 
 ```bash
-docker compose run --rm api python -m app.db.seed               # idempotent
-docker compose run --rm api python -m app.cli send-test-email   # proves RESEND_API_KEY
-docker compose run --rm api python -m app.cli eval-agent        # 10 Persian samples vs. the real LLM
-curl http://127.0.0.1:8000/health
 docker compose logs -f bot
 docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+docker compose run --rm --no-deps api python -m app.cli check-outbound   # Telegram/DeepSeek/Resend/Google reachable?
+docker compose run --rm --no-deps api python -m app.dashboard.demo --purge
+docker compose down          # keeps data; add -v to wipe volumes
 ```
-
-Useful queries:
-
-```sql
-select id, status, intent, steps, prompt_tokens, completion_tokens, latency_ms, error
-  from agent_runs order by id desc limit 10;
-select run_id, tool_name, status, latency_ms from tool_calls order by id desc limit 20;
-```
-
-`eval-agent` runs as a separate user (`telegram_user_id = 0`) with its own two contacts and a fixed
-clock (Tuesday 2026-10-27 09:00 Tehran), so it never touches your data and gives the same expected
-dates on any day. It exits non-zero if any sample fails.
-
-## Acceptance check (batch 02)
-
-1. `docker compose up --build`; check the bot log shows no errors.
-2. Voice: "فردا ساعت ده صبح با علی رضایی جلسه بگذار" → transcript → preview → ✅ → event in Google
-   Calendar at 10:00 Tehran time, Ali invited (`ali.rezaei@example.com` is a fake seed address;
-   edit the contact to a real one to see the invite arrive).
-3. Voice: "به سارا ایمیل بزن و بگو گزارش را تا فردا می‌فرستم" → preview → ✅ → email delivered
-   (point Sara's contact at an address you can read).
-4. Tap ✅ twice quickly → the second tap answers "قبلاً انجام شده".
-5. `docker compose run --rm api python -m app.cli eval-agent` → 10/10.
 
 ## Tests
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt
-python -m pytest                                    # unit tests, no services needed
-RUN_DB_TESTS=1 python -m pytest                     # + PostgreSQL tests (TRUNCATE all tables!)
-RUN_DB_TESTS=1 RUN_LIVE_TESTS=1 python -m pytest tests/test_agent_live.py -v   # real DeepSeek
+python -m pytest                                   # unit tests, no services needed
+RUN_DB_TESTS=1 python -m pytest                    # + PostgreSQL tests (they TRUNCATE all tables: throwaway DB!)
+RUN_DB_TESTS=1 RUN_LIVE_TESTS=1 python -m pytest tests/test_agent_live.py -v   # 10 samples vs. real DeepSeek
 ```
 
-Offline agent tests replay the 10 samples (`app/agent/evaluation.py`) through the real loop, tools,
-validation and database with a scripted model; they test the plumbing and the guarantees (injection,
-invented addresses, past dates, step cap, double tap), not the model's judgement. The live tests and
-`eval-agent` measure the model.
+The suite covers config, STT (real ffmpeg), the provider (retries, logging), tools (Google request shape, idempotent
+inserts), the agent loop and guardrails, confirmation and double taps, memory, the admin API (auth, filters, errors),
+MCP tools (in-process and as a stdio subprocess) with fake calendar/email clients, hardening (logs, rate limit,
+cleanup), budgets and alerts, quality signals, the dashboard (access control, aggregation queries, CSV) and the
+evaluation scoring.
+
+New migration after changing `app/db/models.py`: `alembic revision --autogenerate -m "..."`, review it;
+`tests/test_db.py::test_models_match_migration` fails if a model changes without one.
+
+## Deployment
+
+Production uses `docker-compose.prod.yml` (no source mounts, healthchecks, log rotation, resource limits) and the
+scripts in `deploy/`. Follow [docs/DEPLOY.md](docs/DEPLOY.md): server hardening, Docker, outbound check (with options
+for networks where Telegram, Docker Hub, Google or Resend are blocked), `.env`, DNS, first start, backups with a tested
+restore, updates and rollback (`deploy/deploy.sh` is safe to run twice).
 
 ## Layout
 
 ```
 app/
-  config.py            settings from environment (.env)
-  cli.py               send-test-email, eval-agent
-  bot/                 handlers, Persian messages, preview + buttons
-  stt/                 ffmpeg conversion, Vosk recognizer, STT service
-  agent/               provider, prompts/, actions, agent loop, executor, memory, pipeline, evaluation
-  tools/               registry (schemas + logging), Google Calendar, Resend, Persian/Jalali helpers
-  db/                  models, session, repo helpers, seed
-  api/                 FastAPI app
-scripts/google_auth.py one-time OAuth consent (stdlib only)
-migrations/            0001 schema · 0002 tool-call latency · 0003 agent metadata, text messages
+  config.py          settings (env)            logging_setup.py   JSON logs, request_id/run_id
+  cli.py             send-test-email, eval-agent, check-outbound
+  budget.py          token budgets, alerts, hard stop
+  bot/               handlers, Persian messages, previews and buttons, rate limit, notifications
+  stt/               ffmpeg, Vosk, STT service, audio cleanup job
+  agent/             provider, usage (llm_calls), prompts/, actions, agent loop, executor, memory, pipeline, evaluation
+  tools/             registry (schemas, logging), Google Calendar, Resend, Persian/Jalali helpers
+  api/               FastAPI health + admin API
+  mcp/               MCP server (stdio / streamable HTTP)
+  dashboard/         FastAPI + Jinja2 dashboard, queries, auth, demo data, vendored Chart.js and Vazirmatn
+  db/                models, session, seed, read-only role
+migrations/          0001 schema … 0006 budget alerts (incl. the run_quality view)
+deploy/              migrate.sh, Caddyfile, deploy/rollback/backup/restore/check-host/ship-images scripts
+evals/               30-item evaluation set
+scripts/             google_auth.py (OAuth, run on your computer), make_lock.py
 tests/
+docs/                SPEC.md, DEPLOY.md
 ```
 
-## Data model notes
+## Data model
 
-Typed messages are stored in `voice_messages` with `source='text'` (no `telegram_file_id`), so both
-inputs share one pipeline and one history. `agent_runs.status` moves
-`running → needs_clarification | pending_confirmation → confirmed → executed | failed`, or `rejected`
-(cancel, edit, expired). Deliberate deviations from the spec's column list: `voice_messages.audio_path`,
-`agent_runs.prompt_tokens/completion_tokens` (instead of `tokens`), `emails.to_address` (`TO` is reserved).
+`users`, `contacts` (Persian + English `aliases`, GIN index), `voice_messages` (`source` voice|text; audio deleted
+after STT), `agent_runs` (intent, action JSON, status, model, prompt version, steps, tokens, latency, error),
+`tool_calls` (unique `idempotency_key`, latency), `calendar_events`, `emails`, `memory_facts`, `audit_events`,
+`llm_calls` (one row per LLM request), `run_feedback` (👍/👎), `budget_alerts`, and the view `run_quality`.
+Every table has `created_at`/`updated_at` (trigger-maintained). Deliberate deviations from the spec's column list:
+`voice_messages.audio_path`/`source`, `agent_runs.prompt_tokens`/`completion_tokens` instead of `tokens`,
+`emails.to_address` (`TO` is reserved in SQL).
+
+## Security
+
+- Secrets only in `.env` (git- and Docker-ignored, `chmod 600` on the server), held as `SecretStr`; Telegram request
+  URLs (which contain the token) are never logged.
+- Only allowlisted Telegram users; runs and buttons are checked against the tapping user; nothing is sent or
+  scheduled without Confirm; transcripts are data, not instructions, and code guardrails bound what the model can do.
+- Containers run as UID 10001 with `no-new-privileges` and no capabilities (prod); only Caddy's 80/443 are public;
+  API, dashboard and MCP bind to `127.0.0.1`.
+- Admin API: `X-Admin-Key` (constant-time). MCP HTTP: Bearer token. Dashboard: owner-only password or one-time
+  Telegram link, signed cookies, CSRF tokens, login throttling, strict CSP, read-only database role.
+- Bot replies never use `parse_mode`; dashboard CSV export neutralises spreadsheet formulas.
 
 ## Known limitations
 
-- `vosk-model-small-fa-0.42` reports 14–23 % word error rate; names and numbers are the usual
-  failures. Low-confidence results ask you to repeat (`STT_MIN_CONFIDENCE`, default 0.6, is a starting
-  point: tune it on your own voice messages).
-- One owner action per message; no recurring events, no multi-recipient email (by design).
-- A crash between "confirmed" and the provider call leaves the run `confirmed` with a pending
-  tool call; it is never retried automatically (safe, but you need to resend the request).
-
-## Security notes
-
-- Secrets live only in `.env` (git-ignored, excluded from the Docker build context), held as `SecretStr`.
-- `httpx` request logging is silenced because Telegram URLs contain the bot token.
-- Containers run as UID 10001; the database has no published port; the API listens on loopback only.
-- The allowlist check runs before every handler, including button callbacks; runs are also checked
-  against the tapping user's ID.
-- Bot replies never use `parse_mode`, so transcripts and model output cannot inject formatting or links.
+- **Not yet verified end to end against the real services.** Telegram, DeepSeek, Google Calendar, Resend and a Docker
+  build could not be reached from the development sandbox; everything else is covered by the test suite. Run
+  the acceptance steps in docs/DEPLOY.md §10 and `eval-agent` on your machine or server.
+- Speech recognition: `vosk-model-small-fa-0.42` has a 14–23 % word error rate; names, numbers and email addresses
+  are the usual failures. Type new email addresses instead of dictating them. Tune `STT_MIN_CONFIDENCE`.
+- One action per message; no recurring events; one email recipient (by design).
+- Cost figures use off-peak list prices from `LLM_PRICES`; DeepSeek doubles prices in weekday peak hours, so dashboard
+  cost is an estimate.
+- Rate limits and the dashboard's one-time-link registry are in memory (single bot and dashboard process); a restart
+  resets them.
+- A crash between "confirmed" and the provider call leaves the run `confirmed`; it is not retried automatically
+  (use `POST /runs/{id}/retry`).
+- In Iran, Telegram is blocked and Docker Hub refuses Iranian IPs; Google and Resend may as well. The deployment needs
+  the proxy/gateway/ship options in docs/DEPLOY.md step 5, which may conflict with those providers' terms.
