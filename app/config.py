@@ -57,6 +57,20 @@ class Settings(BaseSettings):
     # Bearer token for the MCP server's HTTP transport (127.0.0.1:8001). stdio needs none.
     mcp_api_key: SecretStr = SecretStr("")
 
+    # Dashboard (usage & quality), served on its own subdomain behind the reverse proxy
+    dashboard_host: str = ""  # e.g. usage.example.com; empty = local only (http://127.0.0.1:8080)
+    # pbkdf2_sha256:<iterations>:<salt>:<hash>  ->  python -m app.dashboard.auth hash-password
+    dashboard_password_hash: SecretStr = SecretStr("")
+    # Signs session cookies and Telegram login links (shared by bot and dashboard)
+    dashboard_secret_key: SecretStr = SecretStr("")
+    dashboard_session_hours: int = Field(default=12, ge=1, le=168)
+    dashboard_db_user: str = "dashboard_ro"
+    dashboard_db_password: SecretStr = SecretStr("")
+
+    @property
+    def dashboard_public_url(self) -> str:
+        return f"https://{self.dashboard_host}" if self.dashboard_host else "http://127.0.0.1:8080"
+
     # Speech to text
     vosk_model_path: Path = Path("/opt/vosk-model")
     # Mean word confidence below this asks the user to repeat.

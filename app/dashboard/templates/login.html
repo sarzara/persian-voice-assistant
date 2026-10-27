@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% set hide_nav = true %}
+{% block title %}ورود · Sign in{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>ورود <span class="en">Sign in</span></h1>
+  {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+  {% if password_enabled %}
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>رمز عبور <span class="en">Password</span>
+      <input type="password" name="password" autocomplete="current-password" required autofocus>
+    </label>
+    <button type="submit">ورود</button>
+  </form>
+  <p class="muted">یا در ربات تلگرام دستور <code>/dashboard</code> را بفرستید تا پیوند ورود یک‌بارمصرف دریافت کنید.</p>
+  {% else %}
+  <p>ورود با رمز غیرفعال است. در ربات تلگرام <code>/dashboard</code> را بفرستید.</p>
+  {% endif %}
+</section>
+{% endblock %}

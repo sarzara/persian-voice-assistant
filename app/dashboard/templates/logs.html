@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="toolbar">
+  <h1>گزارش اجراها <span class="en">Logs</span> <small class="muted">{{ total|fa_num }}</small></h1>
+  <a class="button" href="/logs.csv{{ '?' ~ query if query }}">خروجی CSV <span class="en">Export</span></a>
+</div>
+<form class="filters card" method="get" action="/logs">
+  <label>از <span class="en">From</span><input type="date" name="date_from" value="{{ f.date_from or '' }}"></label>
+  <label>تا <span class="en">To</span><input type="date" name="date_to" value="{{ f.date_to or '' }}"></label>
+  <label>مدل <span class="en">Model</span><select name="model"><option value="">همه</option>
+    {% for m in options.models %}<option {{ 'selected' if f.model == m }}>{{ m }}</option>{% endfor %}</select></label>
+  <label>وضعیت <span class="en">Status</span><select name="status"><option value="">همه</option>
+    {% for v in options.statuses %}<option {{ 'selected' if f.status == v }}>{{ v }}</option>{% endfor %}</select></label>
+  <label>نوع <span class="en">Intent</span><select name="intent"><option value="">همه</option>
+    {% for v in options.intents %}<option {{ 'selected' if f.intent == v }}>{{ v }}</option>{% endfor %}</select></label>
+  <button type="submit">اعمال</button>
+</form>
+<section class="card"><div class="scroll"><table>
+  <thead><tr><th>#</th><th>زمان</th><th>مدل</th><th>نوع</th><th>وضعیت <span class="en">Status</span></th>
+    <th>تصمیم <span class="en">Decision</span></th><th>گام</th><th>توکن</th><th>هزینه</th><th>تأخیر</th><th>JSON ✗</th><th>👍/👎</th></tr></thead>
+  <tbody>{% for r in rows %}<tr class="{{ 'bad' if r.status == 'failed' }}">
+    <td><a href="/runs/{{ r.run_id }}">{{ r.run_id|fa_digits }}</a></td><td>{{ r.created_at|fa_dt }}</td>
+    <td class="ltr">{{ r.model or '—' }}</td><td>{{ r.intent }}</td><td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+    <td>{{ r.decision or ('question' if r.asked_question else '—') }}</td><td>{{ r.steps|fa_num }}</td>
+    <td>{{ r.tokens|fa_num }}</td><td>{{ r.cost_usd|fa_usd }}</td><td>{{ r.latency_ms|fa_ms }}</td>
+    <td>{{ r.json_failures|fa_num }}</td><td>{{ {1: '👍', -1: '👎'}.get(r.rating, '') }}</td></tr>
+  {% else %}<tr><td colspan="12" class="muted">موردی یافت نشد.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% if pages > 1 %}<nav class="pager">
+  {% if page > 1 %}<a href="/logs?page={{ page - 1 }}{{ '&' ~ query if query }}">قبلی</a>{% endif %}
+  <span>صفحهٔ {{ page|fa_digits }} از {{ pages|fa_digits }}</span>
+  {% if page < pages %}<a href="/logs?page={{ page + 1 }}{{ '&' ~ query if query }}">بعدی</a>{% endif %}
+</nav>{% endif %}
+</section>
+{% endblock %}

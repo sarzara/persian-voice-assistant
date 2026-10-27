@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}داشبورد مصرف و کیفیت{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">دستیار صوتی <span class="en">Usage &amp; Quality</span></div>
+    {% if not hide_nav %}
+    <nav>
+      <a href="/" class="{{ 'on' if request.url.path == '/' }}">نمای کلی <span class="en">Overview</span></a>
+      <a href="/logs" class="{{ 'on' if request.url.path.startswith('/logs') }}">گزارش اجراها <span class="en">Logs</span></a>
+      <form method="post" action="/logout" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit" class="link">خروج <span class="en">Sign out</span></button>
+      </form>
+    </nav>
+    {% endif %}
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

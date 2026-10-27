@@ -80,6 +80,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(msg.START.format(name=f" {name}" if name else ""))
 
 
+async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Owner only: a one-time sign-in link for the usage dashboard (valid 10 minutes)."""
+    from telegram import LinkPreviewOptions
+
+    from app.dashboard import auth as dash_auth
+
+    settings = get_settings()
+    if update.effective_user.id != settings.owner_telegram_id:
+        await update.effective_message.reply_text(msg.DASHBOARD_OWNER_ONLY)
+        return
+    try:
+        link = dash_auth.login_link(update.effective_user.id)
+    except RuntimeError:
+        await update.effective_message.reply_text(msg.DASHBOARD_NOT_CONFIGURED)
+        return
+    # No link preview: Telegram's preview fetcher must not touch the login URL.
+    await update.effective_message.reply_text(msg.DASHBOARD_LINK.format(link=link),
+                                              link_preview_options=LinkPreviewOptions(is_disabled=True))
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(msg.HELP)
 

@@ -59,6 +59,7 @@ def build_application() -> Application:
     app.add_handler(TypeHandler(Update, handlers.allowlist_gate), group=-1)
     app.add_handler(CommandHandler("start", handlers.start, filters=private))
     app.add_handler(CommandHandler("help", handlers.help_command, filters=private))
+    app.add_handler(CommandHandler("dashboard", handlers.dashboard_command, filters=private))
     app.add_handler(CallbackQueryHandler(handlers.on_callback, pattern=r"^run:"))
     app.add_handler(CallbackQueryHandler(handlers.on_feedback, pattern=r"^fb:"))
     app.add_handler(MessageHandler(private & filters.VOICE, handlers.voice))

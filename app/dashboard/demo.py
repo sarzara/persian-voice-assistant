@@ -49,8 +49,9 @@ def plan_runs(days: int, now: dt.datetime, rng: random.Random) -> list[dict]:
         for _ in range(rng.randint(2, 6) if weekend else rng.randint(6, 18)):
             at = dt.datetime.combine(day, dt.time(rng.randint(8, 21), rng.randint(0, 59)), TEHRAN)
             model = _pick(rng, MODELS)
-            sample = rng.choice(SAMPLES)
             outcome = _pick(rng, [("action", 0.74), ("question", 0.20), ("failed", 0.06)])
+            # Transcript consistent with the outcome (questions come from the "question" samples).
+            sample = rng.choice([x for x in SAMPLES if (x.expect["kind"] == "action") == (outcome == "action")])
             json_fail = rng.random() < (0.04 if model == "deepseek-v4-pro" else 0.08)
             steps = min(6, (2 if outcome != "failed" else rng.randint(3, 6)) + (1 if json_fail else 0)
                         + (1 if rng.random() < 0.25 else 0))

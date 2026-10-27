@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="toolbar"><h1>اجرای {{ r.run_id|fa_digits }} <span class="en">Run detail</span></h1>
+  <span class="pill {{ r.status }}">{{ r.status }}</span></div>
+<section class="kpis">
+  <div class="card kpi"><span class="label">زمان</span><b class="sm">{{ r.created_at|fa_dt }}</b></div>
+  <div class="card kpi"><span class="label">مدل <span class="en">Model</span></span><b class="sm ltr">{{ r.model or '—' }}</b><small>prompt {{ r.prompt_version or '—' }}</small></div>
+  <div class="card kpi"><span class="label">توکن <span class="en">Tokens</span></span><b>{{ r.tokens|fa_num }}</b><small>{{ r.cost_usd|fa_usd }}</small></div>
+  <div class="card kpi"><span class="label">تأخیر <span class="en">Latency</span></span><b>{{ r.latency_ms|fa_ms }}</b><small>{{ r.steps|fa_num }} گام</small></div>
+  <div class="card kpi"><span class="label">تصمیم <span class="en">Decision</span></span><b class="sm">{{ r.decision or ('question' if r.asked_question else '—') }}</b>
+    <small>{{ {1: '👍', -1: '👎'}.get(r.rating, '') }}</small></div>
+</section>
+<section class="card"><h2>متن پیام <span class="en">Transcript</span>
+  <small class="muted">{{ r.source or '' }} · {{ (r.stt_confidence)|fa_pct if r.stt_confidence is not none else '' }}</small></h2>
+  <p class="transcript">{{ r.transcript or '—' }}</p></section>
+{% if r.error %}<section class="card"><h2>خطا <span class="en">Error</span></h2><pre class="ltr">{{ r.error }}</pre></section>{% endif %}
+<section class="card"><h2>خروجی <span class="en">Action JSON</span></h2><pre class="ltr">{{ pretty(r.action_json) }}</pre></section>
+{% for e in r.emails %}<section class="card"><h2>ایمیل ارسالی <span class="en">Email ({{ e.status }})</span></h2>
+  <p><b>به:</b> <span class="ltr">{{ e.to_address }}</span> · <b>موضوع:</b> {{ e.subject }}</p><pre class="body">{{ e.body }}</pre></section>{% endfor %}
+{% for ev in r.events %}<section class="card"><h2>رویداد تقویم <span class="en">Calendar event</span></h2>
+  <p>{{ ev.title }} · <span class="ltr">{{ ev.date }} {{ ev.time }}</span> · {{ ev.duration_min|fa_num }} دقیقه</p></section>{% endfor %}
+<section class="card"><h2>فراخوانی‌های مدل <span class="en">LLM calls</span></h2><div class="scroll"><table>
+  <thead><tr><th>هدف <span class="en">Purpose</span></th><th>مدل</th><th>ورودی</th><th>کش</th><th>خروجی</th><th>هزینه</th><th>تأخیر</th><th>تلاش</th><th>وضعیت</th></tr></thead>
+  <tbody>{% for c in r.llm_calls %}<tr class="{{ 'bad' if c.status == 'error' }}"><td>{{ c.purpose }}</td><td class="ltr">{{ c.model }}</td>
+    <td>{{ c.prompt_tokens|fa_num }}</td><td>{{ c.cached_tokens|fa_num }}</td><td>{{ c.completion_tokens|fa_num }}</td>
+    <td>{{ c.cost|fa_usd }}</td><td>{{ c.latency_ms|fa_ms }}</td><td>{{ c.attempts|fa_num }}</td><td>{{ c.status }}{% if c.error %} <small class="ltr">{{ c.error }}</small>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="9" class="muted">—</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="card"><h2>ابزارها <span class="en">Tool calls</span></h2>
+  {% for t in r.tool_calls %}<details class="{{ 'bad' if t.status == 'failed' }}"><summary><span class="ltr">{{ t.tool_name }}</span> · {{ t.status }} · {{ t.latency_ms|fa_ms }}</summary>
+    <div class="cols"><pre class="ltr">{{ pretty(t.arguments_json) }}</pre><pre class="ltr">{{ pretty(t.result_json) }}</pre></div></details>
+  {% else %}<p class="muted">—</p>{% endfor %}</section>
+{% endblock %}

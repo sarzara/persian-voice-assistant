@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+{% if demo %}
+<p class="banner">داده‌های نمایشی (Demo data) در نمودارها هست. پس از شروع استفادهٔ واقعی حذفشان کنید:
+  <code>python -m app.dashboard.demo --purge</code> — بودجه‌ها هرگز آن‌ها را حساب نمی‌کنند.</p>
+{% endif %}
+
+<div class="toolbar">
+  <h1>نمای کلی <span class="en">Overview</span></h1>
+  <div class="seg">
+    {% for d in (7, 30, 90) %}<a href="/?days={{ d }}" class="{{ 'on' if days == d }}">{{ d|fa_digits }} روز</a>{% endfor %}
+  </div>
+</div>
+
+<section class="budgets">
+  {% for b in budgets %}
+  <div class="card budget">
+    <div class="row"><strong>{{ 'بودجهٔ روزانه' if b.period == 'daily' else 'بودجهٔ ماهانه' }}</strong>
+      <span class="en">{{ 'Daily' if b.period == 'daily' else 'Monthly' }} token budget</span></div>
+    {% if b.limit %}
+    {% set pct = (b.pct if b.pct < 100 else 100) %}
+    <div class="bar {{ 'over' if b.pct >= 100 else ('warn' if b.pct >= thresholds[0] else '') }}">
+      <span data-pct="{{ pct|round(1) }}"></span>
+      {% for t in thresholds if t < 100 %}<i class="tick" data-pct="{{ t }}"></i>{% endfor %}
+    </div>
+    <div class="row muted"><span>{{ b.used|fa_num }} از {{ b.limit|fa_num }} توکن</span><span>{{ (b.pct / 100)|fa_pct(1) }}</span></div>
+    {% if b.exhausted and hard_stop %}<p class="alert small">توقف کامل فعال است: ربات درخواست جدید نمی‌پذیرد.</p>{% endif %}
+    {% else %}<p class="muted">تعریف نشده (TOKEN_BUDGET_{{ 'DAILY' if b.period == 'daily' else 'MONTHLY' }}=0)</p>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section class="kpis">
+  <div class="card kpi"><span class="label">توکن امروز <span class="en">Tokens today</span></span><b>{{ k.tokens_today|fa_compact }}</b></div>
+  <div class="card kpi"><span class="label">توکن ۷ روز <span class="en">Tokens 7 days</span></span><b>{{ k.tokens_7d|fa_compact }}</b></div>
+  <div class="card kpi"><span class="label">توکن {{ days|fa_digits }} روز <span class="en">Tokens {{ days }} days</span></span><b>{{ k.tokens_window|fa_compact }}</b></div>
+  <div class="card kpi"><span class="label">هزینه <span class="en">Cost (today / {{ days }}d)</span></span><b>{{ k.cost_today|fa_usd }}</b><small>{{ k.cost_window|fa_usd }}</small></div>
+  <div class="card kpi"><span class="label">تأخیر <span class="en">Latency P50 / P95</span></span><b>{{ k.latency_p50|fa_ms }}</b><small>{{ k.latency_p95|fa_ms }}</small></div>
+  <div class="card kpi"><span class="label">نرخ موفقیت <span class="en">Success rate</span></span><b>{{ k.success_rate|fa_pct }}</b><small>{{ k.runs|fa_num }} اجرا</small></div>
+  <div class="card kpi"><span class="label">نرخ تأیید <span class="en">Confirmation rate</span></span><b>{{ k.confirmation_rate|fa_pct }}</b><small>ویرایش {{ k.edit_rate|fa_pct }}</small></div>
+</section>
+
+<section class="charts">
+  <div class="card chart"><h2>توکن روزانه بر اساس مدل <span class="en">Tokens per day · by model</span></h2><canvas id="tokensByModel"></canvas></div>
+  <div class="card chart"><h2>توکن روزانه بر اساس هدف <span class="en">Tokens per day · by purpose</span></h2><canvas id="tokensByPurpose"></canvas></div>
+  <div class="card chart"><h2>هزینهٔ روزانه <span class="en">Cost per day (USD) · by model</span></h2><canvas id="costByModel"></canvas></div>
+  <div class="card chart"><h2>تأخیر <span class="en">Latency over time (P50 / P95)</span></h2><canvas id="latency"></canvas></div>
+  <div class="card chart wide"><h2>موفقیت و ویرایش <span class="en">Success &amp; edit rate over time</span></h2><canvas id="quality"></canvas></div>
+</section>
+
+<section class="card">
+  <h2>کیفیت هر مدل <span class="en">Quality per model · {{ days }} days</span></h2>
+  <div class="scroll"><table>
+    <thead><tr><th>مدل <span class="en">Model</span></th><th>اجرا <span class="en">Runs</span></th>
+      <th>موفقیت <span class="en">Success</span></th><th>JSON معتبر <span class="en">JSON-valid</span></th>
+      <th>ویرایش <span class="en">Edit rate</span></th><th>میانگین گام <span class="en">Avg steps</span></th>
+      <th>هزینه/اجرا <span class="en">Avg cost/run</span></th><th>👍 <span class="en">Thumbs-up</span></th></tr></thead>
+    <tbody>{% for m in models %}<tr>
+      <td class="ltr">{{ m.model }}</td><td>{{ m.runs|fa_num }}</td><td>{{ m.success_rate|fa_pct(1) }}</td>
+      <td>{{ m.json_valid_rate|fa_pct(1) }}</td><td>{{ m.edit_rate|fa_pct(1) }}</td><td>{{ m.avg_steps|fa_num(1) }}</td>
+      <td>{{ m.avg_cost|fa_usd }}</td><td>{{ m.thumbs_up|fa_pct }} <small class="muted">({{ m.rated|fa_num }})</small></td>
+    </tr>{% else %}<tr><td colspan="8" class="muted">هنوز اجرایی ثبت نشده است.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <h2>پرهزینه‌ترین اجراها <span class="en">Most expensive runs</span></h2>
+  <div class="scroll"><table>
+    <thead><tr><th>#</th><th>زمان <span class="en">Time</span></th><th>مدل</th><th>نوع <span class="en">Intent</span></th>
+      <th>گام</th><th>توکن</th><th>هزینه <span class="en">Cost</span></th></tr></thead>
+    <tbody>{% for r in top %}<tr>
+      <td><a href="/runs/{{ r.run_id }}">{{ r.run_id|fa_digits }}</a></td><td>{{ r.created_at|fa_dt }}</td>
+      <td class="ltr">{{ r.model }}</td><td>{{ r.intent }}</td><td>{{ r.steps|fa_num }}</td>
+      <td>{{ r.tokens|fa_num }}</td><td>{{ r.cost|fa_usd }}</td></tr>
+    {% else %}<tr><td colspan="7" class="muted">—</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+<script type="application/json" id="chart-data">{{ chart_json|safe }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="/static/vendor/chart-4.4.9.umd.js"></script>
+<script src="/static/charts.js"></script>
+{% endblock %}

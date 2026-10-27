@@ -12,3 +12,6 @@ vosk==0.3.45
 jdatetime==6.1.1
 tzdata==2026.5
 mcp==2.3.0
+Jinja2==3.1.6
+itsdangerous==2.2.0
+python-multipart==0.0.32
