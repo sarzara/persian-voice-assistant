@@ -1,4 +1,5 @@
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -190,6 +191,18 @@ async def test_contacts_list_search_create_and_errors(owner):
 
 # ----------------------------------------------------------------- retry ---
 
+async def test_retry_refuses_a_meeting_whose_time_has_passed(owner):
+    from app.agent.executor import confirm_and_execute
+
+    ids = await make_runs(owner)  # fixed-clock samples: "tomorrow" = 2026-10-28, already in the past
+    run_id = ids["schedule_tomorrow"]
+    await confirm_and_execute(run_id, 111111111, calendar=None, mailer=None)
+    async with client() as c:
+        r = await c.post(f"/runs/{run_id}/retry", headers=H)
+    if dt.datetime.now(ZoneInfo("Asia/Tehran")) > dt.datetime(2026, 10, 28, 10, 0, tzinfo=ZoneInfo("Asia/Tehran")):
+        assert r.status_code == 409 and "passed" in r.json()["detail"]
+
+
 async def test_retry_rejects_non_failed_and_unknown(owner):
     ids = await make_runs(owner)
     async with client() as c:
@@ -200,8 +213,15 @@ async def test_retry_rejects_non_failed_and_unknown(owner):
 async def test_retry_failed_execution_runs_once_and_notifies(owner, monkeypatch):
     from app.agent.executor import confirm_and_execute
 
-    ids = await make_runs(owner)
-    run_id = ids["schedule_tomorrow"]
+    # A meeting 30 days from the REAL today: retry refuses meetings whose time has already passed,
+    # so a fixed calendar date here would make this test fail once that date is reached.
+    real_now = dt.datetime.now(ZoneInfo("Asia/Tehran"))
+    day = (real_now + dt.timedelta(days=30)).date().isoformat()
+    out = await Agent(ScriptedProvider([[tc("submit_schedule_action", {
+        "date": day, "time": "10:00", "duration_min": 30, "title": "جلسه با علی",
+        "guests": [{"email": "ali.rezaei@example.com"}]})]])).run(
+        user=owner, message_id=None, transcript="جلسه", context=AgentContext(now=real_now))
+    run_id = out.run_id
     failed = await confirm_and_execute(run_id, 111111111, calendar=None, mailer=None)  # calendar not configured
     assert failed.status.value == "failed"
 
