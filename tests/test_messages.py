@@ -44,3 +44,17 @@ async def test_confirming_a_cancelled_request_answers_in_persian(monkeypatch):
                             message=SimpleNamespace(reply_text=reply))
     await handlers.on_callback(SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1)), None)
     assert reply.await_args.args[0] == msg.ALREADY_CANCELLED
+
+def test_every_text_has_both_languages_with_the_same_placeholders():
+    for key, versions in msg.TEXTS.items():
+        assert set(versions) == {"fa", "en"}, key
+        assert sorted(re.findall(r"{\w+}", versions["fa"])) == sorted(re.findall(r"{\w+}", versions["en"])), key
+
+
+def test_t_picks_language_and_digits():
+    assert msg.t("VOICE_TOO_LONG", "en", limit=60).startswith("That voice message is too long (more than 60")
+    assert "۶۰" in msg.t("VOICE_TOO_LONG", "fa", limit=60)
+    assert msg.t("CANCELLED", "xx") == msg.t("CANCELLED", "fa")   # unknown language falls back to Persian
+    assert msg.START == msg.TEXTS["START"]["fa"]                   # old names still work
+    
+
