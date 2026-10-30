@@ -18,6 +18,7 @@ class AgentContext:
     contacts: list[dict[str, Any]] = field(default_factory=list)   # contacts that match names in the transcript
     history: list[dict[str, Any]] = field(default_factory=list)    # last few messages, oldest first
     editing: dict[str, Any] | None = None  # action the user asked to change
+    language: str = "fa"                   # "fa" or "en": the language of everything the owner will read
 
     def render(self) -> str:
         data = asdict(self)

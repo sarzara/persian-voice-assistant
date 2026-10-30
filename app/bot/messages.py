@@ -148,13 +148,44 @@ TEXTS: dict[str, dict[str, str]] = {
         "fa": "داشبورد هنوز تنظیم نشده است (DASHBOARD_SECRET_KEY).",
         "en": "The dashboard is not configured yet (DASHBOARD_SECRET_KEY).",
     },
+    "WORKING": {
+        "fa": "در حال انجام…",
+        "en": "Working…",
+    },
+    "LANGUAGE_USAGE": {
+        "fa": (
+            "زبان فعلی: {current}\n\n"
+            "برای تغییر بفرستید:\n"
+            "/language fa — فارسی\n"
+            "/language en — English\n"
+            "/language auto — خودکار (پاسخ به زبان پیام شما)"
+        ),
+        "en": (
+            "Current language: {current}\n\n"
+            "To change it, send:\n"
+            "/language fa — Persian\n"
+            "/language en — English\n"
+            "/language auto — automatic (I answer in the language of your message)"
+        ),
+    },
+    "LANGUAGE_SET": {
+        "fa": "✅ زبان روی «{name}» تنظیم شد.",
+        "en": "✅ Language set to {name}.",
+    },
 }
 
 LANGUAGES = ("fa", "en")
 
+# Names of the /language settings, in each display language.
+LANGUAGE_NAMES = {
+    "fa": {"fa": "فارسی", "en": "انگلیسی", "auto": "خودکار"},
+    "en": {"fa": "Persian", "en": "English", "auto": "automatic"},
+}
+
 COMMANDS = [
     ("start", "شروع و معرفی"),
     ("help", "راهنما"),
+    ("language", "زبان: فارسی / English / خودکار"),
     ("dashboard", "پیوند ورود به داشبورد مصرف"),
 ]
 

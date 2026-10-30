@@ -56,6 +56,7 @@ class AgentOutcome:
     question: str | None = None
     error: str | None = None
     notes: list[str] = field(default_factory=list)  # shown under the preview (e.g. a contact that will be saved)
+    language: str = "fa"  # "fa" or "en": the language the owner is answered in
 
 
 class Agent:
@@ -113,7 +114,7 @@ class Agent:
                             messages.append(_tool_msg(call.id, {"ok": False, "error": "ignored: a final answer was already accepted"}))
                             continue
                         if call.name in TERMINAL_TOOLS:
-                            result, outcome = self._terminal(call, run_id, allowed_emails, now, tz, s)
+                            result, outcome = self._terminal(call, run_id, allowed_emails, now, tz, s, context.language)
                             messages.append(_tool_msg(call.id, result))
                         else:
                             try:
@@ -133,10 +134,11 @@ class Agent:
         if outcome is None:
             outcome = AgentOutcome("failed", run_id, error=f"no valid final answer within {self.settings.agent_max_steps} steps")
 
+        outcome.language = context.language
         await self._finish(run_id, outcome, steps, totals, int((time.perf_counter() - started) * 1000))
         return outcome
 
-    def _terminal(self, call, run_id, allowed_emails, now, tz, session):
+    def _terminal(self, call, run_id, allowed_emails, now, tz, session, language="fa"):
         raw: dict[str, Any] = {}
         try:
             raw = call.parsed_arguments()
@@ -154,7 +156,7 @@ class Agent:
             self._log_terminal(session, run_id, call, raw, True, None)
             return {"ok": True}, AgentOutcome("question", run_id, question=parsed.question)
 
-        problems = check_action(parsed, allowed_emails=allowed_emails, now=now, tz=tz)
+        problems = check_action(parsed, allowed_emails=allowed_emails, now=now, tz=tz, language=language)
         if problems:
             err = " ".join(problems)
             self._log_terminal(session, run_id, call, raw, False, err, kind="guardrail")

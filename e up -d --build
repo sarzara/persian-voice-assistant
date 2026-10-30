@@ -1,0 +1,598 @@
+warning: in the working copy of 'tests/test_i18n.py', CRLF will be replaced by LF the next time Git touches it
+[1mdiff --git a/app/agent/actions.py b/app/agent/actions.py[m
+[1mindex a86c29a..7b449e2 100644[m
+[1m--- a/app/agent/actions.py[m
+[1m+++ b/app/agent/actions.py[m
+[36m@@ -12,6 +12,7 @@[m [mfrom typing import Annotated, Any, Literal[m
+ [m
+ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator[m
+ [m
+[32m+[m[32mfrom app.i18n import detect_text_language[m
+ from app.tools import persian[m
+ from app.tools.schema_utils import clean_schema[m
+ [m
+[36m@@ -40,10 +41,10 @@[m [mclass ScheduleAction(_Strict):[m
+     date: dt.date = Field(description="Gregorian YYYY-MM-DD")[m
+     time: dt.time = Field(description="24-hour HH:MM, Asia/Tehran")[m
+     duration_min: int = Field(ge=5, le=600)[m
+[31m-    title: str = Field(min_length=1, max_length=200, description="Persian")[m
+[31m-    description: str = Field(default="", max_length=2000, description="Persian, may be empty")[m
+[32m+[m[32m    title: str = Field(min_length=1, max_length=200, description="In CONTEXT.language")[m
+[32m+[m[32m    description: str = Field(default="", max_length=2000, description="In CONTEXT.language, may be empty")[m
+     guests: list[Person] = Field(default_factory=list, max_length=MAX_GUESTS)[m
+[31m-    warnings: list[str] = Field(default_factory=list, max_length=3, description="Persian notes, e.g. a conflict")[m
+[32m+[m[32m    warnings: list[str] = Field(default_factory=list, max_length=3, description="Short notes in CONTEXT.language, e.g. a conflict")[m
+ [m
+     @field_validator("time", mode="before")[m
+     @classmethod[m
+[36m@@ -72,9 +73,9 @@[m [mclass ScheduleAction(_Strict):[m
+ class EmailAction(_Strict):[m
+     type: Literal["email"] = "email"[m
+     to: Person = Field(description="Exactly one recipient")[m
+[31m-    subject: str = Field(min_length=1, max_length=200, description="Persian")[m
+[32m+[m[32m    subject: str = Field(min_length=1, max_length=200, description="In CONTEXT.language")[m
+     # Capped so the full body always fits in one Telegram preview: the owner confirms exactly what is sent.[m
+[31m-    body: str = Field(min_length=1, max_length=3000, description="Persian")[m
+[32m+[m[32m    body: str = Field(min_length=1, max_length=3000, description="In CONTEXT.language")[m
+ [m
+     def emails(self) -> set[str]:[m
+         return {self.to.email}[m
+[36m@@ -84,7 +85,7 @@[m [mclass EmailAction(_Strict):[m
+ [m
+ [m
+ class Clarification(_Strict):[m
+[31m-    question: str = Field(min_length=1, max_length=500, description="One short Persian question")[m
+[32m+[m[32m    question: str = Field(min_length=1, max_length=500, description="One short question in CONTEXT.language")[m
+ [m
+ [m
+ Action = Annotated[ScheduleAction | EmailAction, Field(discriminator="type")][m
+[36m@@ -117,7 +118,7 @@[m [mTERMINAL_SCHEMAS = [[m
+         "parameters": _params(EmailAction)}},[m
+     {"type": "function", "function": {[m
+         "name": "ask_user",[m
+[31m-        "description": "Final answer: ask the owner one short clarifying question in Persian.",[m
+[32m+[m[32m        "description": "Final answer: ask the owner one short clarifying question.",[m
+         "parameters": _params(Clarification, drop=())}},[m
+ ][m
+ [m
+[36m@@ -142,6 +143,7 @@[m [mdef check_action([m
+     allowed_emails: set[str],[m
+     now: dt.datetime,[m
+     tz: dt.tzinfo,[m
+[32m+[m[32m    language: str = "fa",[m
+ ) -> list[str]:[m
+     """Return a list of problems (empty = acceptable). Messages go back to the model."""[m
+     problems: list[str] = [][m
+[36m@@ -165,6 +167,11 @@[m [mdef check_action([m
+         texts = {"subject": action.subject, "body": action.body}[m
+ [m
+     for field_name, text in texts.items():[m
+[31m-        if text and not persian.has_persian(text):[m
+[32m+[m[32m        if not text:[m
+[32m+[m[32m            continue[m
+[32m+[m[32m        if language == "en":[m
+[32m+[m[32m            if detect_text_language(text) != "en":[m
+[32m+[m[32m                problems.append(f"{field_name} must be written in English (CONTEXT.language is en).")[m
+[32m+[m[32m        elif not persian.has_persian(text):[m
+             problems.append(f"{field_name} must be written in Persian.")[m
+     return problems[m
+[1mdiff --git a/app/agent/agent.py b/app/agent/agent.py[m
+[1mindex dd1f45a..e6360b3 100644[m
+[1m--- a/app/agent/agent.py[m
+[1m+++ b/app/agent/agent.py[m
+[36m@@ -56,6 +56,7 @@[m [mclass AgentOutcome:[m
+     question: str | None = None[m
+     error: str | None = None[m
+     notes: list[str] = field(default_factory=list)  # shown under the preview (e.g. a contact that will be saved)[m
+[32m+[m[32m    language: str = "fa"  # "fa" or "en": the language the owner is answered in[m
+ [m
+ [m
+ class Agent:[m
+[36m@@ -113,7 +114,7 @@[m [mclass Agent:[m
+                             messages.append(_tool_msg(call.id, {"ok": False, "error": "ignored: a final answer was already accepted"}))[m
+                             continue[m
+                         if call.name in TERMINAL_TOOLS:[m
+[31m-                            result, outcome = self._terminal(call, run_id, allowed_emails, now, tz, s)[m
+[32m+[m[32m                            result, outcome = self._terminal(call, run_id, allowed_emails, now, tz, s, context.language)[m
+                             messages.append(_tool_msg(call.id, result))[m
+                         else:[m
+                             try:[m
+[36m@@ -133,10 +134,11 @@[m [mclass Agent:[m
+         if outcome is None:[m
+             outcome = AgentOutcome("failed", run_id, error=f"no valid final answer within {self.settings.agent_max_steps} steps")[m
+ [m
+[32m+[m[32m        outcome.language = context.language[m
+         await self._finish(run_id, outcome, steps, totals, int((time.perf_counter() - started) * 1000))[m
+         return outcome[m
+ [m
+[31m-    def _terminal(self, call, run_id, allowed_emails, now, tz, session):[m
+[32m+[m[32m    def _terminal(self, call, run_id, allowed_emails, now, tz, session, language="fa"):[m
+         raw: dict[str, Any] = {}[m
+         try:[m
+             raw = call.parsed_arguments()[m
+[36m@@ -154,7 +156,7 @@[m [mclass Agent:[m
+             self._log_terminal(session, run_id, call, raw, True, None)[m
+             return {"ok": True}, AgentOutcome("question", run_id, question=parsed.question)[m
+ [m
+[31m-        problems = check_action(parsed, allowed_emails=allowed_emails, now=now, tz=tz)[m
+[32m+[m[32m        problems = check_action(parsed, allowed_emails=allowed_emails, now=now, tz=tz, language=language)[m
+         if problems:[m
+             err = " ".join(problems)[m
+             self._log_terminal(session, run_id, call, raw, False, err, kind="guardrail")[m
+[1mdiff --git a/app/agent/context.py b/app/agent/context.py[m
+[1mindex f90a1eb..cf166d7 100644[m
+[1m--- a/app/agent/context.py[m
+[1m+++ b/app/agent/context.py[m
+[36m@@ -18,6 +18,7 @@[m [mclass AgentContext:[m
+     contacts: list[dict[str, Any]] = field(default_factory=list)   # contacts that match names in the transcript[m
+     history: list[dict[str, Any]] = field(default_factory=list)    # last few messages, oldest first[m
+     editing: dict[str, Any] | None = None  # action the user asked to change[m
+[32m+[m[32m    language: str = "fa"                   # "fa" or "en": the language of everything the owner will read[m
+ [m
+     def render(self) -> str:[m
+         data = asdict(self)[m
+[1mdiff --git a/app/agent/memory.py b/app/agent/memory.py[m
+[1mindex e3c5024..0885dd5 100644[m
+[1m--- a/app/agent/memory.py[m
+[1m+++ b/app/agent/memory.py[m
+[36m@@ -64,7 +64,8 @@[m [mdef _summarise_run(run: AgentRun | None) -> dict[str, Any]:[m
+ [m
+ [m
+ async def build_context(user: User, transcript: str, *, current_message_id: int | None = None,[m
+[31m-                        editing: dict | None = None, now: dt.datetime | None = None) -> AgentContext:[m
+[32m+[m[32m                        editing: dict | None = None, now: dt.datetime | None = None,[m
+[32m+[m[32m                        language: str = "fa") -> AgentContext:[m
+     async with session_scope() as s:[m
+         facts = (await s.execute([m
+             select(MemoryFact).where(MemoryFact.user_id == user.id)[m
+[36m@@ -90,10 +91,12 @@[m [masync def build_context(user: User, transcript: str, *, current_message_id: int[m
+     return AgentContext([m
+         now=now or now_in(user.timezone or get_settings().default_timezone),[m
+         owner_name=user.name,[m
+[31m-        preferences={f.key: f.value for f in facts},[m
+[32m+[m[32m        # "language" is a bot setting, given to the model as CONTEXT.language instead.[m
+[32m+[m[32m        preferences={f.key: f.value for f in facts if f.key != "language"},[m
+         contacts=[contact_dict(c) for c in contacts_in_text(contacts, transcript)],[m
+         history=history,[m
+         editing=editing,[m
+[32m+[m[32m        language=language,[m
+     )[m
+ [m
+ [m
+[36m@@ -102,11 +105,14 @@[m [masync def _known_emails(session, user_id: int) -> set[str]:[m
+     return {e.lower() for e in rows if e}[m
+ [m
+ [m
+[31m-async def preview_notes(user: User, action: ScheduleAction | EmailAction) -> list[str]:[m
+[32m+[m[32masync def preview_notes(user: User, action: ScheduleAction | EmailAction, language: str = "fa") -> list[str]:[m
+     """Tell the owner, before confirming, which new contacts will be saved."""[m
+     async with session_scope() as s:[m
+         known = await _known_emails(s, user.id)[m
+     people = [action.to] if isinstance(action, EmailAction) else action.guests[m
+[32m+[m[32m    if language == "en":[m
+[32m+[m[32m        return [f"After this is done, \"{p.name}\" <{p.email}> will be added to your contacts."[m
+[32m+[m[32m                for p in people if p.name and p.email not in known][m
+     return [f"پس از انجام، «{p.name}» با نشانی {p.email} به مخاطبان افزوده می‌شود."[m
+             for p in people if p.name and p.email not in known][m
+ [m
+[1mdiff --git a/app/agent/pipeline.py b/app/agent/pipeline.py[m
+[1mindex 6f0e6da..446f527 100644[m
+[1m--- a/app/agent/pipeline.py[m
+[1m+++ b/app/agent/pipeline.py[m
+[36m@@ -69,6 +69,15 @@[m [masync def store_text_message(user: User, text: str) -> int:[m
+         return vm.id[m
+ [m
+ [m
+[32m+[m[32masync def reply_language(user: User, transcript: str) -> str:[m
+[32m+[m[32m    """'fa' or 'en': the user's /language setting, or for 'auto' the language of the message itself."""[m
+[32m+[m[32m    from app.i18n import resolve_language, user_language[m
+[32m+[m
+[32m+[m[32m    async with session_scope() as s:[m
+[32m+[m[32m        setting = await user_language(s, user.id)[m
+[32m+[m[32m    return resolve_language(setting, transcript)[m
+[32m+[m
+[32m+[m
+ async def process_message(user: User, message_id: int, transcript: str, *, editing: dict | None = None,[m
+                           agent: Agent | None = None) -> AgentOutcome:[m
+     from app.budget import ensure_within_budget[m
+[36m@@ -76,10 +85,12 @@[m [masync def process_message(user: User, message_id: int, transcript: str, *, editi[m
+     await ensure_within_budget()  # raises BudgetExceeded when the hard stop is active[m
+     if editing is None:[m
+         editing = await take_pending_edit(user)[m
+[31m-    context = await memory.build_context(user, transcript, current_message_id=message_id, editing=editing)[m
+[32m+[m[32m    language = await reply_language(user, transcript)[m
+[32m+[m[32m    context = await memory.build_context(user, transcript, current_message_id=message_id, editing=editing,[m
+[32m+[m[32m                                         language=language)[m
+     outcome = await (agent or get_agent()).run(user=user, message_id=message_id, transcript=transcript, context=context)[m
+     if outcome.kind == "action":[m
+[31m-        outcome.notes = await memory.preview_notes(user, outcome.action)[m
+[32m+[m[32m        outcome.notes = await memory.preview_notes(user, outcome.action, outcome.language)[m
+     return outcome[m
+ [m
+ [m
+[1mdiff --git a/app/agent/prompts/__init__.py b/app/agent/prompts/__init__.py[m
+[1mindex a47b0d6..11d76ac 100644[m
+[1m--- a/app/agent/prompts/__init__.py[m
+[1m+++ b/app/agent/prompts/__init__.py[m
+[36m@@ -4,7 +4,7 @@[m [magent_runs.prompt_version records which one produced each run."""[m
+ from functools import lru_cache[m
+ from pathlib import Path[m
+ [m
+[31m-PROMPT_VERSION = "v1"[m
+[32m+[m[32mPROMPT_VERSION = "v2"  # v2: Persian + English (CONTEXT.language)[m
+ [m
+ [m
+ @lru_cache[m
+[1mdiff --git a/app/bot/handlers.py b/app/bot/handlers.py[m
+[1mindex 7a0ea1e..abae1e3 100644[m
+[1m--- a/app/bot/handlers.py[m
+[1m+++ b/app/bot/handlers.py[m
+[36m@@ -21,7 +21,7 @@[m [mfrom app.logging_setup import new_request_id, request_id_var, set_run_id[m
+ from app.db.models import VoiceMessage[m
+ from app.db.repo import audit, upsert_user[m
+ from app.db.session import session_scope[m
+[31m-from app.i18n import user_language[m
+[32m+[m[32mfrom app.i18n import SETTINGS, detect_text_language, set_user_language, user_language[m
+ from app.stt.service import SttOutcome, SttResult, transcribe_voice_message[m
+ from app.agent import pipeline[m
+ from app.agent.agent import AgentOutcome[m
+[36m@@ -78,7 +78,8 @@[m [masync def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:[m
+         db_user = await upsert_user(session, user.id, name_if_new=user.full_name)[m
+         await audit(session, "bot.start", f"telegram:{user.id}")[m
+         name = db_user.name[m
+[31m-    await update.effective_message.reply_text(msg.START.format(name=f" {name}" if name else ""))[m
+[32m+[m[32m        lang = "en" if await user_language(session, db_user.id) == "en" else "fa"[m
+[32m+[m[32m    await update.effective_message.reply_text(msg.t("START", lang, name=f" {name}" if name else ""))[m
+ [m
+ [m
+ async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:[m
+[36m@@ -102,7 +103,33 @@[m [masync def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE)[m
+ [m
+ [m
+ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:[m
+[31m-    await update.effective_message.reply_text(msg.HELP)[m
+[32m+[m[32m    user = update.effective_user[m
+[32m+[m[32m    async with session_scope() as session:[m
+[32m+[m[32m        db_user = await upsert_user(session, user.id, name_if_new=user.full_name)[m
+[32m+[m[32m        lang = "en" if await user_language(session, db_user.id) == "en" else "fa"[m
+[32m+[m[32m    await update.effective_message.reply_text(msg.t("HELP", lang))[m
+[32m+[m
+[32m+[m
+[32m+[m[32masync def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:[m
+[32m+[m[32m    """/language fa|en|auto sets the language; /language alone shows the current setting."""[m
+[32m+[m[32m    user = update.effective_user[m
+[32m+[m[32m    args = getattr(context, "args", None) or [][m
+[32m+[m[32m    choice = args[0].strip().lower() if args else ""[m
+[32m+[m[32m    async with session_scope() as session:[m
+[32m+[m[32m        db_user = await upsert_user(session, user.id, name_if_new=user.full_name)[m
+[32m+[m[32m        current = await user_language(session, db_user.id)[m
+[32m+[m[32m        if choice in SETTINGS:[m
+[32m+[m[32m            await set_user_language(session, db_user.id, choice)[m
+[32m+[m[32m            await audit(session, "bot.language", f"telegram:{user.id}", language=choice)[m
+[32m+[m[32m    if choice in SETTINGS:[m
+[32m+[m[32m        # Answer in the new language; for "auto" keep the language the user was reading.[m
+[32m+[m[32m        lang = choice if choice in ("fa", "en") else ("en" if current == "en" else "fa")[m
+[32m+[m[32m        await update.effective_message.reply_text([m
+[32m+[m[32m            msg.t("LANGUAGE_SET", lang, name=msg.LANGUAGE_NAMES[lang][choice]))[m
+[32m+[m[32m        return[m
+[32m+[m[32m    lang = "en" if current == "en" else "fa"[m
+[32m+[m[32m    await update.effective_message.reply_text([m
+[32m+[m[32m        msg.t("LANGUAGE_USAGE", lang, current=msg.LANGUAGE_NAMES[lang][current]))[m
+ [m
+ [m
+ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:[m
+[36m@@ -160,16 +187,17 @@[m [masync def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:[m
+     if not result.usable:[m
+         await message.reply_text(stt_problem_message(result))[m
+         return[m
+[31m-    await message.reply_text(msg.TRANSCRIPT.format(text=result.text))[m
+[32m+[m[32m    await message.reply_text(msg.t("TRANSCRIPT", result.language, text=result.text))[m
+     await respond_to(update, context, db_user, record.id, result.text)[m
+ [m
+ [m
+ def stt_problem_message(result: SttResult) -> str:[m
+[32m+[m[32m    lang = result.language[m
+     if result.outcome is SttOutcome.EMPTY:[m
+[31m-        return msg.STT_EMPTY[m
+[32m+[m[32m        return msg.t("STT_EMPTY", lang)[m
+     if result.outcome is SttOutcome.LOW_CONFIDENCE:[m
+[31m-        return msg.STT_LOW_CONFIDENCE.format(text=result.text)[m
+[31m-    return msg.STT_FAILED[m
+[32m+[m[32m        return msg.t("STT_LOW_CONFIDENCE", lang, text=result.text)[m
+[32m+[m[32m    return msg.t("STT_FAILED", lang)[m
+ [m
+ [m
+ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:[m
+[36m@@ -190,12 +218,13 @@[m [masync def respond_to(update: Update, context: ContextTypes.DEFAULT_TYPE, db_user[m
+         outcome = await pipeline.process_message(db_user, message_id, transcript)[m
+     except BudgetExceeded as exc:[m
+         log.warning("Request refused: %s", exc)[m
+[32m+[m[32m        lang = detect_text_language(transcript)[m
+         await update.effective_message.reply_text([m
+[31m-            msg.BUDGET_STOP_DAILY if exc.period == "daily" else msg.BUDGET_STOP_MONTHLY)[m
+[32m+[m[32m            msg.t("BUDGET_STOP_DAILY" if exc.period == "daily" else "BUDGET_STOP_MONTHLY", lang))[m
+         return[m
+     except ValueError as exc:  # e.g. DEEPSEEK_API_KEY missing[m
+         log.error("Agent not available: %s", exc)[m
+[31m-        await update.effective_message.reply_text(msg.AGENT_UNAVAILABLE)[m
+[32m+[m[32m        await update.effective_message.reply_text(msg.t("AGENT_UNAVAILABLE", detect_text_language(transcript)))[m
+         return[m
+     await render_outcome(update, context, outcome)[m
+ [m
+[36m@@ -215,9 +244,11 @@[m [masync def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non[m
+         return[m
+     run_id, choice = parsed[m
+     tg_id = update.effective_user.id[m
+[32m+[m[32m    # The preview the user tapped is in the language of the request.[m
+[32m+[m[32m    lang = detect_text_language(getattr(query.message, "text", None) or "")[m
+ [m
+     if choice == preview.CONFIRM:[m
+[31m-        await query.answer("در حال انجام…")[m
+[32m+[m[32m        await query.answer(msg.t("WORKING", lang))[m
+         # Remove the buttons first, so the preview cannot be tapped again while we work.[m
+         await query.edit_message_reply_markup(reply_markup=None)[m
+         result = await executor.confirm_and_execute([m
+[36m@@ -225,11 +256,11 @@[m [masync def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non[m
+         )[m
+         text = {[m
+             ExecStatus.EXECUTED: lambda: preview.render_executed(result.action, result.data),[m
+[31m-            ExecStatus.ALREADY_DONE: lambda: msg.ALREADY_DONE,[m
+[31m-            ExecStatus.CANCELLED: lambda: msg.ALREADY_CANCELLED,[m
+[31m-            ExecStatus.EXPIRED: lambda: msg.EXPIRED,[m
+[31m-            ExecStatus.NOT_FOUND: lambda: msg.RUN_NOT_FOUND,[m
+[31m-            ExecStatus.FAILED: lambda: preview.render_failure(result.error),[m
+[32m+[m[32m            ExecStatus.ALREADY_DONE: lambda: msg.t("ALREADY_DONE", lang),[m
+[32m+[m[32m            ExecStatus.CANCELLED: lambda: msg.t("ALREADY_CANCELLED", lang),[m
+[32m+[m[32m            ExecStatus.EXPIRED: lambda: msg.t("EXPIRED", lang),[m
+[32m+[m[32m            ExecStatus.NOT_FOUND: lambda: msg.t("RUN_NOT_FOUND", lang),[m
+[32m+[m[32m            ExecStatus.FAILED: lambda: preview.render_failure(result.error, lang),[m
+         }[result.status]()[m
+         markup = preview.feedback_keyboard(run_id) if result.status in (ExecStatus.EXECUTED, ExecStatus.FAILED) else None[m
+         await query.message.reply_text(text, reply_markup=markup)[m
+[36m@@ -241,13 +272,13 @@[m [masync def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non[m
+     result = await executor.reject_run(run_id, tg_id, "edit_requested" if choice == preview.EDIT else "cancelled")[m
+     await query.edit_message_reply_markup(reply_markup=None)[m
+     if result.status is ExecStatus.ALREADY_DONE:[m
+[31m-        await query.message.reply_text(msg.ALREADY_DONE)[m
+[32m+[m[32m        await query.message.reply_text(msg.t("ALREADY_DONE", lang))[m
+     elif result.status is ExecStatus.NOT_FOUND:[m
+[31m-        await query.message.reply_text(msg.RUN_NOT_FOUND)[m
+[32m+[m[32m        await query.message.reply_text(msg.t("RUN_NOT_FOUND", lang))[m
+     elif choice == preview.EDIT:[m
+[31m-        await query.message.reply_text(msg.EDIT_PROMPT)[m
+[32m+[m[32m        await query.message.reply_text(msg.t("EDIT_PROMPT", lang))[m
+     else:[m
+[31m-        await query.message.reply_text(msg.CANCELLED)[m
+[32m+[m[32m        await query.message.reply_text(msg.t("CANCELLED", lang))[m
+ [m
+ [m
+ async def on_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:[m
+[1mdiff --git a/app/bot/main.py b/app/bot/main.py[m
+[1mindex 3512a8b..f000ea1 100644[m
+[1m--- a/app/bot/main.py[m
+[1m+++ b/app/bot/main.py[m
+[36m@@ -79,6 +79,7 @@[m [mdef build_application() -> Application:[m
+     app.add_handler(TypeHandler(Update, handlers.allowlist_gate), group=-1)[m
+     app.add_handler(CommandHandler("start", handlers.start, filters=private))[m
+     app.add_handler(CommandHandler("help", handlers.help_command, filters=private))[m
+[32m+[m[32m    app.add_handler(CommandHandler("language", handlers.language_command, filters=private))[m
+     app.add_handler(CommandHandler("dashboard", handlers.dashboard_command, filters=private))[m
+     app.add_handler(CallbackQueryHandler(handlers.on_callback, pattern=r"^run:"))[m
+     app.add_handler(CallbackQueryHandler(handlers.on_feedback, pattern=r"^fb:"))[m
+[1mdiff --git a/app/bot/messages.py b/app/bot/messages.py[m
+[1mindex 5f090c7..5b9adb2 100644[m
+[1m--- a/app/bot/messages.py[m
+[1m+++ b/app/bot/messages.py[m
+[36m@@ -148,13 +148,44 @@[m [mTEXTS: dict[str, dict[str, str]] = {[m
+         "fa": "داشبورد هنوز تنظیم نشده است (DASHBOARD_SECRET_KEY).",[m
+         "en": "The dashboard is not configured yet (DASHBOARD_SECRET_KEY).",[m
+     },[m
+[32m+[m[32m    "WORKING": {[m
+[32m+[m[32m        "fa": "در حال انجام…",[m
+[32m+[m[32m        "en": "Working…",[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "LANGUAGE_USAGE": {[m
+[32m+[m[32m        "fa": ([m
+[32m+[m[32m            "زبان فعلی: {current}\n\n"[m
+[32m+[m[32m            "برای تغییر بفرستید:\n"[m
+[32m+[m[32m            "/language fa — فارسی\n"[m
+[32m+[m[32m            "/language en — English\n"[m
+[32m+[m[32m            "/language auto — خودکار (پاسخ به زبان پیام شما)"[m
+[32m+[m[32m        ),[m
+[32m+[m[32m        "en": ([m
+[32m+[m[32m            "Current language: {current}\n\n"[m
+[32m+[m[32m            "To change it, send:\n"[m
+[32m+[m[32m            "/language fa — Persian\n"[m
+[32m+[m[32m            "/language en — English\n"[m
+[32m+[m[32m            "/language auto — automatic (I answer in the language of your message)"[m
+[32m+[m[32m        ),[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "LANGUAGE_SET": {[m
+[32m+[m[32m        "fa": "✅ زبان روی «{name}» تنظیم شد.",[m
+[32m+[m[32m        "en": "✅ Language set to {name}.",[m
+[32m+[m[32m    },[m
+ }[m
+ [m
+ LANGUAGES = ("fa", "en")[m
+ [m
+[32m+[m[32m# Names of the /language settings, in each display language.[m
+[32m+[m[32mLANGUAGE_NAMES = {[m
+[32m+[m[32m    "fa": {"fa": "فارسی", "en": "انگلیسی", "auto": "خودکار"},[m
+[32m+[m[32m    "en": {"fa": "Persian", "en": "English", "auto": "automatic"},[m
+[32m+[m[32m}[m
+[32m+[m
+ COMMANDS = [[m
+     ("start", "شروع و معرفی"),[m
+     ("help", "راهنما"),[m
+[32m+[m[32m    ("language", "زبان: فارسی / English / خودکار"),[m
+     ("dashboard", "پیوند ورود به داشبورد مصرف"),[m
+ ][m
+ [m
+[1mdiff --git a/app/bot/preview.py b/app/bot/preview.py[m
+[1mindex c5214b1..294609e 100644[m
+[1m--- a/app/bot/preview.py[m
+[1m+++ b/app/bot/preview.py[m
+[36m@@ -1,4 +1,4 @@[m
+[31m-"""Readable Persian previews and result messages (plain text, never parse_mode)."""[m
+[32m+[m[32m"""Readable previews and result messages in Persian or English (plain text, never parse_mode)."""[m
+ [m
+ from __future__ import annotations[m
+ [m
+[36m@@ -7,10 +7,23 @@[m [mimport datetime as dt[m
+ from telegram import InlineKeyboardButton, InlineKeyboardMarkup[m
+ [m
+ from app.agent.actions import EmailAction, ScheduleAction[m
+[32m+[m[32mfrom app.i18n import detect_text_language[m
+ from app.tools.persian import fa_digits, jalali_text[m
+ [m
+ CONFIRM, EDIT, CANCEL = "confirm", "edit", "cancel"[m
+ [m
+[32m+[m[32mBUTTONS = {[m
+[32m+[m[32m    "fa": ("✅ تأیید", "✏️ ویرایش", "❌ لغو"),[m
+[32m+[m[32m    "en": ("✅ Confirm", "✏️ Edit", "❌ Cancel"),[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef action_language(action: ScheduleAction | EmailAction) -> str:[m
+[32m+[m[32m    """'fa' or 'en': the language the action was written in (the agent writes it in the owner's language)."""[m
+[32m+[m[32m    if isinstance(action, ScheduleAction):[m
+[32m+[m[32m        return detect_text_language(f"{action.title} {action.description}")[m
+[32m+[m[32m    return detect_text_language(f"{action.subject} {action.body}")[m
+[32m+[m
+ [m
+ def _feedback_enabled() -> bool:[m
+     from app.config import get_settings[m
+[36m@@ -27,11 +40,12 @@[m [mdef feedback_keyboard(run_id: int) -> InlineKeyboardMarkup | None:[m
+     return InlineKeyboardMarkup([feedback_row(run_id)]) if _feedback_enabled() else None[m
+ [m
+ [m
+[31m-def keyboard(run_id: int) -> InlineKeyboardMarkup:[m
+[32m+[m[32mdef keyboard(run_id: int, lang: str = "fa") -> InlineKeyboardMarkup:[m
+[32m+[m[32m    confirm, edit, cancel = BUTTONS.get(lang, BUTTONS["fa"])[m
+     rows = [[[m
+[31m-        InlineKeyboardButton("✅ تأیید", callback_data=f"run:{run_id}:{CONFIRM}"),[m
+[31m-        InlineKeyboardButton("✏️ ویرایش", callback_data=f"run:{run_id}:{EDIT}"),[m
+[31m-        InlineKeyboardButton("❌ لغو", callback_data=f"run:{run_id}:{CANCEL}"),[m
+[32m+[m[32m        InlineKeyboardButton(confirm, callback_data=f"run:{run_id}:{CONFIRM}"),[m
+[32m+[m[32m        InlineKeyboardButton(edit, callback_data=f"run:{run_id}:{EDIT}"),[m
+[32m+[m[32m        InlineKeyboardButton(cancel, callback_data=f"run:{run_id}:{CANCEL}"),[m
+     ]][m
+     if _feedback_enabled():[m
+         rows.append(feedback_row(run_id))[m
+[36m@@ -56,7 +70,41 @@[m [mdef _person(name: str | None, email: str) -> str:[m
+     return f"{name} ‹{email}›" if name else email[m
+ [m
+ [m
+[31m-def render_preview(action: ScheduleAction | EmailAction, *, notes: list[str] | None = None) -> str:[m
+[32m+[m[32mdef _render_preview_en(action: ScheduleAction | EmailAction, notes: list[str] | None) -> str:[m
+[32m+[m[32m    if isinstance(action, ScheduleAction):[m
+[32m+[m[32m        start = dt.datetime.combine(action.date, action.time)[m
+[32m+[m[32m        end = start + dt.timedelta(minutes=action.duration_min)[m
+[32m+[m[32m        lines = [[m
+[32m+[m[32m            "📅 Meeting preview",[m
+[32m+[m[32m            "",[m
+[32m+[m[32m            f"• Date: {action.date.strftime('%A, %d %B %Y')} ({action.date.isoformat()})",[m
+[32m+[m[32m            f"• Time: {start.strftime('%H:%M')} to {end.strftime('%H:%M')} "[m
+[32m+[m[32m            f"({action.duration_min} minutes, Tehran time)",[m
+[32m+[m[32m            f"• Title: {action.title}",[m
+[32m+[m[32m        ][m
+[32m+[m[32m        if action.description:[m
+[32m+[m[32m            lines.append(f"• Description: {action.description}")[m
+[32m+[m[32m        if action.guests:[m
+[32m+[m[32m            lines.append("• Guests: " + ", ".join(_person(g.name, g.email) for g in action.guests))[m
+[32m+[m[32m            lines.append("  (guests receive an email invitation)")[m
+[32m+[m[32m        lines += [f"⚠️ {w}" for w in action.warnings][m
+[32m+[m[32m    else:[m
+[32m+[m[32m        lines = [[m
+[32m+[m[32m            "✉️ Email preview",[m
+[32m+[m[32m            "",[m
+[32m+[m[32m            f"• To: {_person(action.to.name, action.to.email)}",[m
+[32m+[m[32m            f"• Subject: {action.subject}",[m
+[32m+[m[32m            "• Message:",[m
+[32m+[m[32m            action.body,  # never truncated: the owner must see everything that will be sent[m
+[32m+[m[32m        ][m
+[32m+[m[32m    lines += [f"ℹ️ {n}" for n in (notes or [])][m
+[32m+[m[32m    lines += ["", "Go ahead?"][m
+[32m+[m[32m    return "\n".join(lines)[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef render_preview(action: ScheduleAction | EmailAction, *, notes: list[str] | None = None, lang: str = "fa") -> str:[m
+[32m+[m[32m    if lang == "en":[m
+[32m+[m[32m        return _render_preview_en(action, notes)[m
+     if isinstance(action, ScheduleAction):[m
+         start = dt.datetime.combine(action.date, action.time)[m
+         end = start + dt.timedelta(minutes=action.duration_min)[m
+[36m@@ -88,7 +136,17 @@[m [mdef render_preview(action: ScheduleAction | EmailAction, *, notes: list[str] | N[m
+     return "\n".join(lines)[m
+ [m
+ [m
+[31m-def render_executed(action: ScheduleAction | EmailAction, data: dict) -> str:[m
+[32m+[m[32mdef render_executed(action: ScheduleAction | EmailAction, data: dict, lang: str | None = None) -> str:[m
+[32m+[m[32m    lang = lang or action_language(action)[m
+[32m+[m[32m    if lang == "en":[m
+[32m+[m[32m        if isinstance(action, ScheduleAction):[m
+[32m+[m[32m            text = "✅ The meeting is in your calendar."[m
+[32m+[m[32m            if action.guests:[m
+[32m+[m[32m                text += " Invitations were sent to the guests."[m
+[32m+[m[32m            if data.get("html_link"):[m
+[32m+[m[32m                text += f"\n{data['html_link']}"[m
+[32m+[m[32m            return text[m
+[32m+[m[32m        return f"✅ Email sent to {_person(action.to.name, action.to.email)}."[m
+     if isinstance(action, ScheduleAction):[m
+         text = "✅ جلسه در تقویم ثبت شد."[m
+         if action.guests:[m
+[36m@@ -99,8 +157,18 @@[m [mdef render_executed(action: ScheduleAction | EmailAction, data: dict) -> str:[m
+     return f"✅ ایمیل برای {_person(action.to.name, action.to.email)} فرستاده شد."[m
+ [m
+ [m
+[31m-def render_failure(error: str | None) -> str:[m
+[32m+[m[32mdef render_failure(error: str | None, lang: str = "fa") -> str:[m
+     e = (error or "").lower()[m
+[32m+[m[32m    if lang == "en":[m
+[32m+[m[32m        if "not configured" in e:[m
+[32m+[m[32m            hint = "The connection to the service (Google Calendar or email) is not set up yet."[m
+[32m+[m[32m        elif "auth" in e or "token" in e or "invalid_grant" in e:[m
+[32m+[m[32m            hint = "Access to Google Calendar has expired; it needs to be authorised again."[m
+[32m+[m[32m        elif "resend" in e:[m
+[32m+[m[32m            hint = "The email service did not accept the request."[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            hint = "The service returned an error."[m
+[32m+[m[32m        return f"❌ Not done. {hint}\nPlease send the request again later."[m
+     if "not configured" in e:[m
+         hint = "اتصال به سرویس (تقویم گوگل یا ایمیل) هنوز تنظیم نشده است."[m
+     elif "auth" in e or "token" in e or "invalid_grant" in e:[m
+[36m@@ -116,8 +184,9 @@[m [mdef outcome_message(outcome) -> tuple[str, InlineKeyboardMarkup | None]:[m
+     """Text (and buttons) for an AgentOutcome, shared by the bot and out-of-band notifications."""[m
+     from app.bot import messages as msg[m
+ [m
+[32m+[m[32m    lang = getattr(outcome, "language", "fa")[m
+     if outcome.kind == "question":[m
+         return outcome.question, feedback_keyboard(outcome.run_id)[m
+     if outcome.kind == "action":[m
+[31m-        return render_preview(outcome.action, notes=outcome.notes), keyboard(outcome.run_id)[m
+[31m-    return msg.AGENT_FAILED, feedback_keyboard(outcome.run_id)[m
+[32m+[m[32m        return render_preview(outcome.action, notes=outcome.notes, lang=lang), keyboard(outcome.run_id, lang)[m
+[32m+[m[32m    return msg.t("AGENT_FAILED", lang), feedback_keyboard(outcome.run_id)[m
+[1mdiff --git a/app/i18n.py b/app/i18n.py[m
+[1mindex 7c944ae..1294355 100644[m
+[1m--- a/app/i18n.py[m
+[1m+++ b/app/i18n.py[m
+[36m@@ -35,6 +35,18 @@[m [masync def user_language(session: AsyncSession, user_id: int) -> str:[m
+     return value if value in SETTINGS else "auto"[m
+ [m
+ [m
+[32m+[m[32masync def set_user_language(session: AsyncSession, user_id: int, setting: str) -> None:[m
+[32m+[m[32m    """Store the /language setting ('fa', 'en' or 'auto') as memory fact "language"."""[m
+[32m+[m[32m    from sqlalchemy import func[m
+[32m+[m[32m    from sqlalchemy.dialects.postgresql import insert as pg_insert[m
+[32m+[m
+[32m+[m[32m    if setting not in SETTINGS:[m
+[32m+[m[32m        raise ValueError(f"unknown language setting {setting!r}")[m
+[32m+[m[32m    stmt = pg_insert(MemoryFact).values(user_id=user_id, key="language", value=setting, source="user")[m
+[32m+[m[32m    await session.execute(stmt.on_conflict_do_update([m
+[32m+[m[32m        constraint="uq_memory_facts_user_id_key", set_={"value": setting, "updated_at": func.now()}))[m
+[32m+[m
+[32m+[m
+ def resolve_language(setting: str, text: str | None = None) -> str:[m
+     """Turn a setting into a concrete language. 'auto' needs the text to decide."""[m
+     if setting in SUPPORTED:[m

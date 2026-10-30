@@ -64,7 +64,8 @@ def _summarise_run(run: AgentRun | None) -> dict[str, Any]:
 
 
 async def build_context(user: User, transcript: str, *, current_message_id: int | None = None,
-                        editing: dict | None = None, now: dt.datetime | None = None) -> AgentContext:
+                        editing: dict | None = None, now: dt.datetime | None = None,
+                        language: str = "fa") -> AgentContext:
     async with session_scope() as s:
         facts = (await s.execute(
             select(MemoryFact).where(MemoryFact.user_id == user.id)
@@ -90,10 +91,12 @@ async def build_context(user: User, transcript: str, *, current_message_id: int 
     return AgentContext(
         now=now or now_in(user.timezone or get_settings().default_timezone),
         owner_name=user.name,
-        preferences={f.key: f.value for f in facts},
+        # "language" is a bot setting, given to the model as CONTEXT.language instead.
+        preferences={f.key: f.value for f in facts if f.key != "language"},
         contacts=[contact_dict(c) for c in contacts_in_text(contacts, transcript)],
         history=history,
         editing=editing,
+        language=language,
     )
 
 
@@ -102,11 +105,14 @@ async def _known_emails(session, user_id: int) -> set[str]:
     return {e.lower() for e in rows if e}
 
 
-async def preview_notes(user: User, action: ScheduleAction | EmailAction) -> list[str]:
+async def preview_notes(user: User, action: ScheduleAction | EmailAction, language: str = "fa") -> list[str]:
     """Tell the owner, before confirming, which new contacts will be saved."""
     async with session_scope() as s:
         known = await _known_emails(s, user.id)
     people = [action.to] if isinstance(action, EmailAction) else action.guests
+    if language == "en":
+        return [f"After this is done, \"{p.name}\" <{p.email}> will be added to your contacts."
+                for p in people if p.name and p.email not in known]
     return [f"پس از انجام، «{p.name}» با نشانی {p.email} به مخاطبان افزوده می‌شود."
             for p in people if p.name and p.email not in known]
 

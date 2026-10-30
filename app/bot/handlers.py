@@ -21,7 +21,7 @@ from app.logging_setup import new_request_id, request_id_var, set_run_id
 from app.db.models import VoiceMessage
 from app.db.repo import audit, upsert_user
 from app.db.session import session_scope
-from app.i18n import user_language
+from app.i18n import SETTINGS, detect_text_language, set_user_language, user_language
 from app.stt.service import SttOutcome, SttResult, transcribe_voice_message
 from app.agent import pipeline
 from app.agent.agent import AgentOutcome
@@ -78,7 +78,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db_user = await upsert_user(session, user.id, name_if_new=user.full_name)
         await audit(session, "bot.start", f"telegram:{user.id}")
         name = db_user.name
-    await update.effective_message.reply_text(msg.START.format(name=f" {name}" if name else ""))
+        lang = "en" if await user_language(session, db_user.id) == "en" else "fa"
+    await update.effective_message.reply_text(msg.t("START", lang, name=f" {name}" if name else ""))
 
 
 async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -102,7 +103,33 @@ async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.effective_message.reply_text(msg.HELP)
+    user = update.effective_user
+    async with session_scope() as session:
+        db_user = await upsert_user(session, user.id, name_if_new=user.full_name)
+        lang = "en" if await user_language(session, db_user.id) == "en" else "fa"
+    await update.effective_message.reply_text(msg.t("HELP", lang))
+
+
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/language fa|en|auto sets the language; /language alone shows the current setting."""
+    user = update.effective_user
+    args = getattr(context, "args", None) or []
+    choice = args[0].strip().lower() if args else ""
+    async with session_scope() as session:
+        db_user = await upsert_user(session, user.id, name_if_new=user.full_name)
+        current = await user_language(session, db_user.id)
+        if choice in SETTINGS:
+            await set_user_language(session, db_user.id, choice)
+            await audit(session, "bot.language", f"telegram:{user.id}", language=choice)
+    if choice in SETTINGS:
+        # Answer in the new language; for "auto" keep the language the user was reading.
+        lang = choice if choice in ("fa", "en") else ("en" if current == "en" else "fa")
+        await update.effective_message.reply_text(
+            msg.t("LANGUAGE_SET", lang, name=msg.LANGUAGE_NAMES[lang][choice]))
+        return
+    lang = "en" if current == "en" else "fa"
+    await update.effective_message.reply_text(
+        msg.t("LANGUAGE_USAGE", lang, current=msg.LANGUAGE_NAMES[lang][current]))
 
 
 async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -160,16 +187,17 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not result.usable:
         await message.reply_text(stt_problem_message(result))
         return
-    await message.reply_text(msg.TRANSCRIPT.format(text=result.text))
+    await message.reply_text(msg.t("TRANSCRIPT", result.language, text=result.text))
     await respond_to(update, context, db_user, record.id, result.text)
 
 
 def stt_problem_message(result: SttResult) -> str:
+    lang = result.language
     if result.outcome is SttOutcome.EMPTY:
-        return msg.STT_EMPTY
+        return msg.t("STT_EMPTY", lang)
     if result.outcome is SttOutcome.LOW_CONFIDENCE:
-        return msg.STT_LOW_CONFIDENCE.format(text=result.text)
-    return msg.STT_FAILED
+        return msg.t("STT_LOW_CONFIDENCE", lang, text=result.text)
+    return msg.t("STT_FAILED", lang)
 
 
 async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -190,12 +218,13 @@ async def respond_to(update: Update, context: ContextTypes.DEFAULT_TYPE, db_user
         outcome = await pipeline.process_message(db_user, message_id, transcript)
     except BudgetExceeded as exc:
         log.warning("Request refused: %s", exc)
+        lang = detect_text_language(transcript)
         await update.effective_message.reply_text(
-            msg.BUDGET_STOP_DAILY if exc.period == "daily" else msg.BUDGET_STOP_MONTHLY)
+            msg.t("BUDGET_STOP_DAILY" if exc.period == "daily" else "BUDGET_STOP_MONTHLY", lang))
         return
     except ValueError as exc:  # e.g. DEEPSEEK_API_KEY missing
         log.error("Agent not available: %s", exc)
-        await update.effective_message.reply_text(msg.AGENT_UNAVAILABLE)
+        await update.effective_message.reply_text(msg.t("AGENT_UNAVAILABLE", detect_text_language(transcript)))
         return
     await render_outcome(update, context, outcome)
 
@@ -215,9 +244,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     run_id, choice = parsed
     tg_id = update.effective_user.id
+    # The preview the user tapped is in the language of the request.
+    lang = detect_text_language(getattr(query.message, "text", None) or "")
 
     if choice == preview.CONFIRM:
-        await query.answer("در حال انجام…")
+        await query.answer(msg.t("WORKING", lang))
         # Remove the buttons first, so the preview cannot be tapped again while we work.
         await query.edit_message_reply_markup(reply_markup=None)
         result = await executor.confirm_and_execute(
@@ -225,11 +256,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         text = {
             ExecStatus.EXECUTED: lambda: preview.render_executed(result.action, result.data),
-            ExecStatus.ALREADY_DONE: lambda: msg.ALREADY_DONE,
-            ExecStatus.CANCELLED: lambda: msg.ALREADY_CANCELLED,
-            ExecStatus.EXPIRED: lambda: msg.EXPIRED,
-            ExecStatus.NOT_FOUND: lambda: msg.RUN_NOT_FOUND,
-            ExecStatus.FAILED: lambda: preview.render_failure(result.error),
+            ExecStatus.ALREADY_DONE: lambda: msg.t("ALREADY_DONE", lang),
+            ExecStatus.CANCELLED: lambda: msg.t("ALREADY_CANCELLED", lang),
+            ExecStatus.EXPIRED: lambda: msg.t("EXPIRED", lang),
+            ExecStatus.NOT_FOUND: lambda: msg.t("RUN_NOT_FOUND", lang),
+            ExecStatus.FAILED: lambda: preview.render_failure(result.error, lang),
         }[result.status]()
         markup = preview.feedback_keyboard(run_id) if result.status in (ExecStatus.EXECUTED, ExecStatus.FAILED) else None
         await query.message.reply_text(text, reply_markup=markup)
@@ -241,13 +272,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     result = await executor.reject_run(run_id, tg_id, "edit_requested" if choice == preview.EDIT else "cancelled")
     await query.edit_message_reply_markup(reply_markup=None)
     if result.status is ExecStatus.ALREADY_DONE:
-        await query.message.reply_text(msg.ALREADY_DONE)
+        await query.message.reply_text(msg.t("ALREADY_DONE", lang))
     elif result.status is ExecStatus.NOT_FOUND:
-        await query.message.reply_text(msg.RUN_NOT_FOUND)
+        await query.message.reply_text(msg.t("RUN_NOT_FOUND", lang))
     elif choice == preview.EDIT:
-        await query.message.reply_text(msg.EDIT_PROMPT)
+        await query.message.reply_text(msg.t("EDIT_PROMPT", lang))
     else:
-        await query.message.reply_text(msg.CANCELLED)
+        await query.message.reply_text(msg.t("CANCELLED", lang))
 
 
 async def on_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

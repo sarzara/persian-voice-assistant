@@ -4,7 +4,7 @@ agent_runs.prompt_version records which one produced each run."""
 from functools import lru_cache
 from pathlib import Path
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"  # v2: Persian + English (CONTEXT.language)
 
 
 @lru_cache

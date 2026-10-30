@@ -69,6 +69,15 @@ async def store_text_message(user: User, text: str) -> int:
         return vm.id
 
 
+async def reply_language(user: User, transcript: str) -> str:
+    """'fa' or 'en': the user's /language setting, or for 'auto' the language of the message itself."""
+    from app.i18n import resolve_language, user_language
+
+    async with session_scope() as s:
+        setting = await user_language(s, user.id)
+    return resolve_language(setting, transcript)
+
+
 async def process_message(user: User, message_id: int, transcript: str, *, editing: dict | None = None,
                           agent: Agent | None = None) -> AgentOutcome:
     from app.budget import ensure_within_budget
@@ -76,10 +85,12 @@ async def process_message(user: User, message_id: int, transcript: str, *, editi
     await ensure_within_budget()  # raises BudgetExceeded when the hard stop is active
     if editing is None:
         editing = await take_pending_edit(user)
-    context = await memory.build_context(user, transcript, current_message_id=message_id, editing=editing)
+    language = await reply_language(user, transcript)
+    context = await memory.build_context(user, transcript, current_message_id=message_id, editing=editing,
+                                         language=language)
     outcome = await (agent or get_agent()).run(user=user, message_id=message_id, transcript=transcript, context=context)
     if outcome.kind == "action":
-        outcome.notes = await memory.preview_notes(user, outcome.action)
+        outcome.notes = await memory.preview_notes(user, outcome.action, outcome.language)
     return outcome
 
 

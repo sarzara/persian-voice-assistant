@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from app.i18n import detect_text_language
 from app.tools import persian
 from app.tools.schema_utils import clean_schema
 
@@ -40,10 +41,10 @@ class ScheduleAction(_Strict):
     date: dt.date = Field(description="Gregorian YYYY-MM-DD")
     time: dt.time = Field(description="24-hour HH:MM, Asia/Tehran")
     duration_min: int = Field(ge=5, le=600)
-    title: str = Field(min_length=1, max_length=200, description="Persian")
-    description: str = Field(default="", max_length=2000, description="Persian, may be empty")
+    title: str = Field(min_length=1, max_length=200, description="In CONTEXT.language")
+    description: str = Field(default="", max_length=2000, description="In CONTEXT.language, may be empty")
     guests: list[Person] = Field(default_factory=list, max_length=MAX_GUESTS)
-    warnings: list[str] = Field(default_factory=list, max_length=3, description="Persian notes, e.g. a conflict")
+    warnings: list[str] = Field(default_factory=list, max_length=3, description="Short notes in CONTEXT.language, e.g. a conflict")
 
     @field_validator("time", mode="before")
     @classmethod
@@ -72,9 +73,9 @@ class ScheduleAction(_Strict):
 class EmailAction(_Strict):
     type: Literal["email"] = "email"
     to: Person = Field(description="Exactly one recipient")
-    subject: str = Field(min_length=1, max_length=200, description="Persian")
+    subject: str = Field(min_length=1, max_length=200, description="In CONTEXT.language")
     # Capped so the full body always fits in one Telegram preview: the owner confirms exactly what is sent.
-    body: str = Field(min_length=1, max_length=3000, description="Persian")
+    body: str = Field(min_length=1, max_length=3000, description="In CONTEXT.language")
 
     def emails(self) -> set[str]:
         return {self.to.email}
@@ -84,7 +85,7 @@ class EmailAction(_Strict):
 
 
 class Clarification(_Strict):
-    question: str = Field(min_length=1, max_length=500, description="One short Persian question")
+    question: str = Field(min_length=1, max_length=500, description="One short question in CONTEXT.language")
 
 
 Action = Annotated[ScheduleAction | EmailAction, Field(discriminator="type")]
@@ -117,7 +118,7 @@ TERMINAL_SCHEMAS = [
         "parameters": _params(EmailAction)}},
     {"type": "function", "function": {
         "name": "ask_user",
-        "description": "Final answer: ask the owner one short clarifying question in Persian.",
+        "description": "Final answer: ask the owner one short clarifying question.",
         "parameters": _params(Clarification, drop=())}},
 ]
 
@@ -142,6 +143,7 @@ def check_action(
     allowed_emails: set[str],
     now: dt.datetime,
     tz: dt.tzinfo,
+    language: str = "fa",
 ) -> list[str]:
     """Return a list of problems (empty = acceptable). Messages go back to the model."""
     problems: list[str] = []
@@ -165,6 +167,11 @@ def check_action(
         texts = {"subject": action.subject, "body": action.body}
 
     for field_name, text in texts.items():
-        if text and not persian.has_persian(text):
+        if not text:
+            continue
+        if language == "en":
+            if detect_text_language(text) != "en":
+                problems.append(f"{field_name} must be written in English (CONTEXT.language is en).")
+        elif not persian.has_persian(text):
             problems.append(f"{field_name} must be written in Persian.")
     return problems
