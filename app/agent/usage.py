@@ -21,8 +21,8 @@ from app.config import get_settings
 log = logging.getLogger(__name__)
 
 DEFAULT_PRICES: dict[str, dict[str, float]] = {
-    "deepseek-v4-flash": {"input": 0.15, "cached_input": 0.003, "output": 0.60},
     "deepseek-flash": {"input": 0.15, "cached_input": 0.003, "output": 0.60},
+    "deepseek-v4-flash": {"input": 0.15, "cached_input": 0.003, "output": 0.60},  # former name
     "deepseek-v4-pro": {"input": 0.66, "cached_input": 0.022, "output": 1.98},
 }
 

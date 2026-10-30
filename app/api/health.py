@@ -28,8 +28,14 @@ async def _timed(coro) -> Check:
         detail = await asyncio.wait_for(coro, timeout=TIMEOUT_S)
         return Check(ok=True, latency_ms=int((time.perf_counter() - started) * 1000), detail=detail)
     except Exception as exc:  # noqa: BLE001 - report, never raise from a probe
-        # Class name only (messages may contain URLs/tokens), except our own safe LookupError.
-        detail = str(exc) if isinstance(exc, LookupError) else exc.__class__.__name__
+        # Never the raw message (it can contain URLs with tokens): our own LookupError, the HTTP status,
+        # or the exception class.
+        if isinstance(exc, LookupError):
+            detail = str(exc)
+        elif isinstance(exc, httpx.HTTPStatusError):
+            detail = f"HTTP {exc.response.status_code}"
+        else:
+            detail = exc.__class__.__name__
         return Check(ok=False, latency_ms=int((time.perf_counter() - started) * 1000), detail=detail)
 
 

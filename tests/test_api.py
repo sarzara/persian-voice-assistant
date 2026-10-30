@@ -93,7 +93,7 @@ async def test_health_reports_each_dependency(monkeypatch, db):
     retired = (await health.readiness(httpx.MockTransport(models_handler)))["llm"]
     assert not retired.ok and "not offered" in retired.detail and "deepseek-v4-pro" in retired.detail
     assert checks["database"].ok and checks["telegram"].ok and checks["telegram"].detail == "@my_bot"
-    assert not checks["llm"].ok and checks["llm"].detail == "HTTPStatusError"
+    assert not checks["llm"].ok and checks["llm"].detail == "HTTP 500"
     assert "sk-test" not in str(checks) and "123:abc" not in str(checks)
 
 

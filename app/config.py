@@ -87,8 +87,9 @@ class Settings(BaseSettings):
     # LLM (DeepSeek, OpenAI-compatible API)
     deepseek_api_key: SecretStr = SecretStr("")
     deepseek_base_url: str = "https://api.deepseek.com"
-    # deepseek-chat / deepseek-reasoner were retired on 2026-07-24; GET /health verifies the name exists.
-    deepseek_model: str = "deepseek-v4-flash"
+    # Must be a name the provider's /models lists: GET /health verifies it. DeepSeek renames models
+    # (deepseek-chat retired 2026-07-24; deepseek-v4-flash replaced by deepseek-flash, V4.1).
+    deepseek_model: str = "deepseek-flash"
     # Optional JSON merged into every chat request, e.g. {"thinking": {"type": "disabled"}}
     deepseek_extra_body: str = "{}"
     llm_timeout_s: float = Field(default=30.0, gt=0)

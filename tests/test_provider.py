@@ -112,3 +112,18 @@ async def test_malformed_response_raises():
 def test_missing_key_rejected():
     with pytest.raises(ValueError):
         OpenAICompatibleProvider(api_key="", base_url="https://x", model="m")
+
+
+async def test_reasoning_content_kept_in_history_for_tool_loops():
+    def handler(request):
+        return httpx.Response(200, json={"model": "deepseek-flash", "choices": [{"message": {
+            "role": "assistant", "content": "", "reasoning_content": "think...",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}]}}]})
+
+    r = await make(handler).complete([], [])
+    assert r.message["reasoning_content"] == "think..." and r.message["tool_calls"]
+
+
+async def test_no_reasoning_field_added_when_absent():
+    r = await make(lambda req: httpx.Response(200, json=ok_body(content="x"))).complete([], [])
+    assert "reasoning_content" not in r.message

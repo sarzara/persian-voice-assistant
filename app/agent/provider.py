@@ -181,6 +181,10 @@ class OpenAICompatibleProvider:
         history_msg: dict[str, Any] = {"role": "assistant", "content": message.get("content") or ""}
         if message.get("tool_calls"):
             history_msg["tool_calls"] = message["tool_calls"]
+        # Thinking-mode models return reasoning_content; DeepSeek expects it back in the history
+        # while a tool loop is in progress, and rejects the next request otherwise.
+        if message.get("reasoning_content"):
+            history_msg["reasoning_content"] = message["reasoning_content"]
         return LLMResponse(
             content=message.get("content"),
             tool_calls=tool_calls,

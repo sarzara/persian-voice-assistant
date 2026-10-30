@@ -26,8 +26,8 @@ from app.db.models import AgentRun, LlmCall, RunFeedback, ToolCall, User, VoiceM
 from app.db.session import get_engine, session_scope
 
 TEHRAN = ZoneInfo("Asia/Tehran")
-MODELS = [("deepseek-v4-flash", 0.85), ("deepseek-v4-pro", 0.15)]
-LATENCY = {"deepseek-v4-flash": (7.0, 0.45), "deepseek-v4-pro": (7.8, 0.40)}  # lognormal mu, sigma (ms)
+MODELS = [("deepseek-flash", 0.85), ("deepseek-v4-pro", 0.15)]
+LATENCY = {"deepseek-flash": (7.0, 0.45), "deepseek-v4-pro": (7.8, 0.40)}  # lognormal mu, sigma (ms)
 
 
 def _pick(rng: random.Random, weighted):

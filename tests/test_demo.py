@@ -18,7 +18,7 @@ def test_plan_is_deterministic_and_covers_30_days():
     days = {r["at"].date() for r in a}
     assert len(days) == 30 and max(days) == dt.date(2026, 10, 26)  # today is left for real data
     assert all(1 <= r["steps"] <= 6 for r in a)
-    assert {r["model"] for r in a} == {"deepseek-v4-flash", "deepseek-v4-pro"}
+    assert {r["model"] for r in a} == {"deepseek-flash", "deepseek-v4-pro"}
     assert {r["outcome"] for r in a} == {"action", "question", "failed"}
 
 
