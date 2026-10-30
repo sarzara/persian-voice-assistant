@@ -276,8 +276,11 @@ Nothing to do by hand. The image build downloads `vosk-model-small-fa-0.42` (53 
 and bakes it into the image at `/opt/vosk-model`. The build log prints its SHA-256. To make later builds
 tamper-evident, put that value in `.env` as `VOSK_MODEL_SHA256=…`. If alphacephei.com is blocked or the download
 fails, copy the zip from your laptop instead; the build uses a local file when one is there:
-`scp vosk-model-small-fa-0.42.zip deploy@SERVER_IP:persian-voice-assistant/models/` (or use 5C, or set
-`VOSK_MODEL_URL` to a copy you host).
+`scp models\vosk-model-small-fa-0.42.zip deploy@SERVER_IP:persian-voice-assistant/models/` (or use 5C, or set
+`VOSK_MODEL_URL` to a copy you host). A mirror of the same file:
+`https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip`, SHA-256
+`977cb5faa538f3a835ccfd35f5f6d8284b5c450b89c700b9bd4736b66536ad46`. Check it on the server with
+`sha256sum models/vosk-model-small-fa-0.42.zip`, and set `VOSK_MODEL_SHA256` to that value.
 
 ## 8. DNS for the dashboard  [your DNS provider]
 

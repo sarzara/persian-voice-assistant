@@ -44,7 +44,11 @@ every LLM call ──► llm_calls (tokens, cost, latency) ──► budgets, al
 Requirements: Docker Desktop (or Docker Engine + Compose v2). The first build downloads the Vosk Persian
 model (`vosk-model-small-fa-0.42`, 53 MB, retried 5 times). If that download fails (e.g. `SSL: UNEXPECTED_EOF`),
 download https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip in a browser, save it unchanged as
-`models/vosk-model-small-fa-0.42.zip`, and build again: the build uses the local file.
+`models/vosk-model-small-fa-0.42.zip`, and build again: the build uses the local file. If alphacephei.com does not
+open, the same file is mirrored at
+https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip
+(53,431,220 bytes, SHA-256 `977cb5faa538f3a835ccfd35f5f6d8284b5c450b89c700b9bd4736b66536ad46`; verified to contain the
+Vosk model, and its bundled Persian test recording transcribes correctly through this app's STT pipeline).
 
 ```bash
 cp .env.example .env         # fill it in (next section)
