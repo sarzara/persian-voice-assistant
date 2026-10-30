@@ -79,6 +79,9 @@ class Settings(BaseSettings):
 
     # Speech to text
     vosk_model_path: Path = Path("/opt/vosk-model")
+    vosk_model_path: Path = Path("/opt/vosk-model")
+    vosk_model_path_en: Path = Path("/opt/vosk-model-en")
+    vosk_model_path_en: Path = Path("/opt/vosk-model-en")
     # Mean word confidence below this asks the user to repeat.
     stt_min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
     # Longer voices are refused before download: bounds CPU time per message.
