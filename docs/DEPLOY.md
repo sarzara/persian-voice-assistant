@@ -274,8 +274,10 @@ nano .env                                                # paste DASHBOARD_PASSW
 
 Nothing to do by hand. The image build downloads `vosk-model-small-fa-0.42` (53 MB) from alphacephei.com
 and bakes it into the image at `/opt/vosk-model`. The build log prints its SHA-256. To make later builds
-tamper-evident, put that value in `.env` as `VOSK_MODEL_SHA256=…`. If alphacephei.com is blocked, use 5C or set
-`VOSK_MODEL_URL` to a copy you host.
+tamper-evident, put that value in `.env` as `VOSK_MODEL_SHA256=…`. If alphacephei.com is blocked or the download
+fails, copy the zip from your laptop instead; the build uses a local file when one is there:
+`scp vosk-model-small-fa-0.42.zip deploy@SERVER_IP:persian-voice-assistant/models/` (or use 5C, or set
+`VOSK_MODEL_URL` to a copy you host).
 
 ## 8. DNS for the dashboard  [your DNS provider]
 

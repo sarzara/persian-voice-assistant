@@ -9,12 +9,31 @@ ARG VOSK_MODEL=vosk-model-small-fa-0.42
 ARG VOSK_MODEL_URL=https://alphacephei.com/vosk/models/${VOSK_MODEL}.zip
 # Optional: pin the archive hash for a reproducible, tamper-evident build.
 ARG VOSK_MODEL_SHA256=
+# A zip placed in ./models/ (e.g. downloaded in a browser) is used instead of downloading.
+COPY models/ /tmp/local-models/
 RUN python - <<'PY'
-import hashlib, os, shutil, sys, urllib.request, zipfile
+import hashlib, os, shutil, sys, time, urllib.request, zipfile
 url, want = os.environ["VOSK_MODEL_URL"], os.environ.get("VOSK_MODEL_SHA256", "").strip().lower()
 name = os.environ["VOSK_MODEL"]
-print(f"Downloading {url}", flush=True)
-urllib.request.urlretrieve(url, "/tmp/model.zip")
+local = f"/tmp/local-models/{name}.zip"
+if os.path.exists(local):
+    print(f"Using local {name}.zip from ./models/", flush=True)
+    shutil.copy(local, "/tmp/model.zip")
+else:
+    for attempt in range(1, 6):
+        try:
+            print(f"Downloading {url} (attempt {attempt}/5)", flush=True)
+            urllib.request.urlretrieve(url, "/tmp/model.zip")
+            break
+        except OSError as exc:
+            print(f"  failed: {exc}", flush=True)
+            if attempt == 5:
+                sys.exit(
+                    "Could not download the Vosk model. Download it in a browser from\n"
+                    f"  {url}\n"
+                    f"and save it as models/{name}.zip in the project folder, then build again."
+                )
+            time.sleep(5 * attempt)
 got = hashlib.sha256(open("/tmp/model.zip", "rb").read()).hexdigest()
 print(f"sha256 {got}", flush=True)
 if want and got != want:

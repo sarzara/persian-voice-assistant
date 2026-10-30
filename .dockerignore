@@ -8,7 +8,9 @@ __pycache__
 *.pyc
 .pytest_cache
 data
-models
+models/*
+!models/*.zip
+!models/.gitkeep
 *.ogg
 *.wav
 # Secrets must never be baked into an image layer

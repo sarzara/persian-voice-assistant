@@ -32,7 +32,8 @@ data/
 *.ogg
 *.oga
 *.wav
-models/
+models/*
+!models/.gitkeep
 
 # --- Editors / OS ---
 .vscode/
