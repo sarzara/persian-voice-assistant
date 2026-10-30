@@ -4,7 +4,7 @@ agent_runs.prompt_version records which one produced each run."""
 from functools import lru_cache
 from pathlib import Path
 
-PROMPT_VERSION = "v2"  # v2: Persian + English (CONTEXT.language)
+PROMPT_VERSION = "v3"  # v2: Persian + English (CONTEXT.language); v3: write subjects, "tell X ..." is one email
 
 
 @lru_cache

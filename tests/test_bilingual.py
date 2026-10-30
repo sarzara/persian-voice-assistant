@@ -177,3 +177,19 @@ async def test_buttons_answer_in_language_of_the_preview(db, monkeypatch):
                             message=SimpleNamespace(text="📅 Meeting preview\n• Title: Team sync", reply_text=reply))
     await handlers.on_callback(SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=1)), None)
     assert reply.await_args.args[0] == msg.t("RUN_NOT_FOUND", "en")
+
+
+# ------------------------------------------------------- prompt v3 / schema ---
+
+def test_prompt_v3_tells_model_to_write_subject_and_treat_tell_as_email():
+    text = system_prompt()
+    assert "Never ask the owner for a subject" in text
+    assert "is ONE email" in text
+
+
+def test_email_recipient_given_as_plain_address_is_accepted():
+    from app.agent.actions import validate_terminal
+
+    action = validate_terminal("submit_email_action",
+                               {"to": "Zaree.Sahar@Gmail.com", "subject": "Test", "body": "Hi, this is a test."})
+    assert action.to.email == "zaree.sahar@gmail.com" and action.to.name is None

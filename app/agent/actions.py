@@ -73,6 +73,12 @@ class ScheduleAction(_Strict):
 class EmailAction(_Strict):
     type: Literal["email"] = "email"
     to: Person = Field(description="Exactly one recipient")
+
+    @field_validator("to", mode="before")
+    @classmethod
+    def _to_from_address(cls, v: Any) -> Any:
+        # Models sometimes send the recipient as a bare address: accept "x@y.com" as {"email": "x@y.com"}.
+        return {"email": v} if isinstance(v, str) else v
     subject: str = Field(min_length=1, max_length=200, description="In CONTEXT.language")
     # Capped so the full body always fits in one Telegram preview: the owner confirms exactly what is sent.
     body: str = Field(min_length=1, max_length=3000, description="In CONTEXT.language")
