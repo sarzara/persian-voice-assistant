@@ -26,11 +26,11 @@ async def _post_init(app: Application) -> None:
     app.bot_data["heartbeat"] = asyncio.create_task(_heartbeat(), name="heartbeat")
     # Load the Vosk model now (a few seconds) instead of on the first voice message,
     # and fail loudly in the logs if it is missing.
-    try:
-        recognizer = get_recognizer()
-        await asyncio.to_thread(recognizer._model)
-    except Exception:  # noqa: BLE001 - text messages still work without STT
-        logging.getLogger(__name__).exception("Vosk model could not be loaded; voice messages will fail")
+    for lang in ("fa", "en"):
+        try:
+            await asyncio.to_thread(get_recognizer(lang)._model)
+        except Exception:  # noqa: BLE001 - text messages still work without STT
+            logging.getLogger(__name__).exception("Vosk %s model could not be loaded", lang)
 
 
 HEARTBEAT_FILE = "/tmp/bot-heartbeat"

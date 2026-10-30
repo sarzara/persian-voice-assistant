@@ -21,6 +21,7 @@ from app.logging_setup import new_request_id, request_id_var, set_run_id
 from app.db.models import VoiceMessage
 from app.db.repo import audit, upsert_user
 from app.db.session import session_scope
+from app.i18n import user_language
 from app.stt.service import SttOutcome, SttResult, transcribe_voice_message
 from app.agent import pipeline
 from app.agent.agent import AgentOutcome
@@ -136,6 +137,9 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             session.add(record)
             await session.flush()
+                          # The voice model follows the user's language setting: "en" -> English model,
+              # "fa" or "auto" -> Persian model (Vosk confidences can't tell the languages apart).
+            voice_language = "en" if await user_language(session, db_user.id) == "en" else "fa"
             await audit(
                 session,
                 "voice.received",
@@ -150,7 +154,7 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         raise
 
     log.info("Stored voice_message id=%s user=%s duration=%ss", record.id, user.id, voice_obj.duration)
-    result = await transcribe_voice_message(record.id, path)
+    result = await transcribe_voice_message(record.id, path, language=voice_language)
     if not result.usable:
         await message.reply_text(stt_problem_message(result))
         return

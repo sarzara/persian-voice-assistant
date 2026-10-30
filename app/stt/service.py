@@ -32,20 +32,23 @@ class SttResult:
     outcome: SttOutcome
     text: str = ""
     confidence: float = 0.0
+    language: str = "fa"  # which speech model was used: "fa" or "en"
 
     @property
     def usable(self) -> bool:
         return self.outcome is SttOutcome.OK
 
 
-_default_recognizer: Recognizer | None = None
+_recognizers: dict[str, Recognizer] = {}
 
 
-def get_recognizer() -> Recognizer:
-    global _default_recognizer
-    if _default_recognizer is None:
-        _default_recognizer = VoskRecognizer(get_settings().vosk_model_path)
-    return _default_recognizer
+def get_recognizer(language: str = "fa") -> Recognizer:
+    """One shared recognizer per language; each model is loaded once per process."""
+    if language not in _recognizers:
+        settings = get_settings()
+        path = settings.vosk_model_path_en if language == "en" else settings.vosk_model_path
+        _recognizers[language] = VoskRecognizer(path)
+    return _recognizers[language]
 
 
 def classify(text: str, confidence: float, min_confidence: float) -> SttOutcome:
@@ -57,10 +60,12 @@ def classify(text: str, confidence: float, min_confidence: float) -> SttOutcome:
 
 
 async def transcribe_voice_message(
-    voice_message_id: int, audio_path: Path, *, recognizer: Recognizer | None = None
+    voice_message_id: int, audio_path: Path, *, language: str = "fa", recognizer: Recognizer | None = None
 ) -> SttResult:
+    """Transcribe with the model for `language` ("fa" or "en"). `recognizer` is for tests."""
     settings = get_settings()
-    recognizer = recognizer or get_recognizer()
+    language = "en" if language == "en" else "fa"
+    recognizer = recognizer or get_recognizer(language)
     wav_path = audio_path.with_suffix(".wav")
     try:
         await ogg_to_wav(audio_path, wav_path)

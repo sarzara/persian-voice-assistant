@@ -88,8 +88,9 @@ async def test_voice_is_downloaded_and_stored(db, tmp_path, monkeypatch):
 
     seen = {}
 
-    async def fake_stt(vm_id, path):
+    async def fake_stt(vm_id, path, language="fa"):
         seen["audio"] = Path(path).read_bytes()
+        seen["language"] = language
         return SttResult(SttOutcome.OK, "فردا ساعت ده", 0.9)
 
     monkeypatch.setattr(handlers, "transcribe_voice_message", fake_stt)
@@ -119,6 +120,7 @@ async def test_voice_is_downloaded_and_stored(db, tmp_path, monkeypatch):
     assert row.telegram_file_id == "FILE_ID_1" and row.duration_s == 7
     assert seen["audio"] == b"OggS-fake-audio"
     assert audits == 1
+    assert seen["language"] == "fa"
     reply = update.effective_message.reply_text.await_args.args[0]
     assert "فردا ساعت ده" in reply and responded["transcript"] == "فردا ساعت ده"
 

@@ -105,3 +105,13 @@ async def test_audio_deleted_even_when_conversion_fails(db, tmp_path):
     result = await transcribe_voice_message(vm_id, bad, recognizer=FakeRecognizer(Transcript("x", 1.0)))
     assert result.outcome is SttOutcome.FAILED
     assert not bad.exists()
+
+def test_get_recognizer_uses_model_path_per_language(monkeypatch, tmp_path):
+    from app.stt import service
+
+    monkeypatch.setenv("VOSK_MODEL_PATH", str(tmp_path / "fa"))
+    monkeypatch.setenv("VOSK_MODEL_PATH_EN", str(tmp_path / "en"))
+    monkeypatch.setattr(service, "_recognizers", {})
+    fa, en = service.get_recognizer("fa"), service.get_recognizer("en")
+    assert fa is not en and service.get_recognizer("en") is en  # cached per language
+    assert str(fa.model_path).endswith("fa") and str(en.model_path).endswith("en")
