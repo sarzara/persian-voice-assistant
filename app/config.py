@@ -6,6 +6,7 @@ single place to check what the deployment needs.
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -86,6 +87,12 @@ class Settings(BaseSettings):
     stt_min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
     # Longer voices are refused before download: bounds CPU time per message.
     stt_max_duration_s: int = Field(default=60, gt=0, le=300)
+    # "vosk": offline, one language per user setting. "whisper": OpenAI-compatible Whisper API
+    # (e.g. Groq), detects Persian/English itself; Vosk is the fallback if the API fails.
+    stt_provider: Literal["vosk", "whisper"] = "vosk"
+    whisper_api_key: SecretStr = SecretStr("")
+    whisper_base_url: str = "https://api.groq.com/openai/v1"
+    whisper_model: str = "whisper-large-v3-turbo"
 
     # LLM (DeepSeek, OpenAI-compatible API)
     deepseek_api_key: SecretStr = SecretStr("")

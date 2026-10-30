@@ -26,6 +26,8 @@ class Transcript:
     # Mean per-word confidence in [0, 1]; 0.0 when nothing was recognised.
     confidence: float
     words: list[dict] = field(default_factory=list)
+    # "fa" or "en" when the engine detects it (Whisper); None for Vosk.
+    language: str | None = None
 
 
 class Recognizer(Protocol):

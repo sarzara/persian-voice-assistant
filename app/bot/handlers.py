@@ -139,7 +139,9 @@ async def voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await session.flush()
                           # The voice model follows the user's language setting: "en" -> English model,
               # "fa" or "auto" -> Persian model (Vosk confidences can't tell the languages apart).
-            voice_language = "en" if await user_language(session, db_user.id) == "en" else "fa"
+            # "fa", "en" or "auto": Whisper detects the language itself (the setting is a hint);
+            # Vosk can't, so it uses the English model only for "en".
+            voice_language = await user_language(session, db_user.id)
             await audit(
                 session,
                 "voice.received",

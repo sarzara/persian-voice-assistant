@@ -120,7 +120,7 @@ async def test_voice_is_downloaded_and_stored(db, tmp_path, monkeypatch):
     assert row.telegram_file_id == "FILE_ID_1" and row.duration_s == 7
     assert seen["audio"] == b"OggS-fake-audio"
     assert audits == 1
-    assert seen["language"] == "fa"
+    assert seen["language"] == "auto"  # no setting stored
     reply = update.effective_message.reply_text.await_args.args[0]
     assert "فردا ساعت ده" in reply and responded["transcript"] == "فردا ساعت ده"
 
